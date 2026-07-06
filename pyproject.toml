@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flintai-sdk-py"
+version = "0.1.0"
+description = "Lightweight SDK for routing AI agent LLM traffic through the FlintAI guardrails proxy"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [
+  {name = "SandboxAQ"},
+]
+keywords = ["ai", "agents", "guardrails"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/sandbox-quantum/flintai-sdk-py"
+"Bug Tracker" = "https://github.com/sandbox-quantum/flintai-sdk-py/issues"
+
+[project.optional-dependencies]
+openai = ["openai>=2.40.0,<3"]
+anthropic = ["anthropic>=0.105.2,<1"]
+genai = ["google-genai>=2.7,<3"]
+langchain = [
+    "langchain-openai>=1.2,<2",
+    "langchain-anthropic>=1.4,<2",
+    "langchain-google-genai>=4.2,<5",
+]
+adk = ["google-adk>=2.1,<3", "google-genai>=2.7,<3"]
+dotenv = ["python-dotenv>=1.2.2"]
+dev = ["pytest>=9.0.3", "ruff>=0.15.15", "mypy>=2.1.0"]
+all = ["flintai-sdk-py[openai,anthropic,genai,langchain,adk,dotenv,dev]"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
