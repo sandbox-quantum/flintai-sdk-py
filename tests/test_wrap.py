@@ -1,18 +1,19 @@
-"""Tests for flintai_sdk.wrap() — wrapping user-created LLM clients."""
+"""Tests for flintai.wrap() — wrapping user-created LLM clients."""
 
 import logging
 import sys
 from unittest.mock import MagicMock
 
-import flintai_sdk
+import flintai
 import pytest
-from flintai_sdk import core
-from flintai_sdk.core import FlintAIClient
-from flintai_sdk.guardrails import GuardrailsConfig
-from flintai_sdk.plugins._llm_wrapper import (
+from flintai import core
+from flintai.core import FlintAIClient
+from flintai.guardrails import GuardrailsConfig
+from flintai.plugins._llm_wrapper import (
     _apply_guardrails_config,
     _clear_wrapped,
     _detect_client_type,
+    _get_sdk_headers,
     _is_wrapped,
     _mark_wrapped,
     _unwrap_langchain_model,
@@ -187,31 +188,31 @@ def test_wrap_double_wrap_noop(monkeypatch, caplog):
     assert "already wrapped" in caplog.text
 
 
-# --- flintai_sdk.wrap() public API ---
+# --- flintai.wrap() public API ---
 
 
 def test_wrap_auto_inits_when_no_client():
-    flintai_sdk.shutdown()
+    flintai.shutdown()
     assert core._client is None
     client = _make_mock_client("openai._client", "OpenAI", "openai")
-    flintai_sdk.wrap(client)
+    flintai.wrap(client)
     assert core._client is not None
 
 
 def test_wrap_auto_init_registers_atexit(monkeypatch):
-    flintai_sdk.shutdown()
-    monkeypatch.setattr(flintai_sdk, "_atexit_registered", False)
+    flintai.shutdown()
+    monkeypatch.setattr(flintai, "_atexit_registered", False)
     client = _make_mock_client("openai._client", "OpenAI", "openai")
-    flintai_sdk.wrap(client)
+    flintai.wrap(client)
     assert core._client is not None
-    assert flintai_sdk._atexit_registered is True
+    assert flintai._atexit_registered is True
 
 
 def test_wrap_with_guardrails_params():
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
     client.api_key = "sk-test"
-    flintai_sdk.wrap(
+    flintai.wrap(
         client,
         gateway_url="https://gw.example.com",
         api_key="grl_key",
@@ -225,7 +226,7 @@ def test_wrap_auto_extracts_llm_api_key():
     client = _make_mock_client("anthropic._client", "Anthropic", "anthropic")
     client._base_url = "https://api.anthropic.com"
     client.api_key = "sk-ant-key"
-    flintai_sdk.wrap(client, gateway_url="https://gw.example.com", api_key="grl_key")
+    flintai.wrap(client, gateway_url="https://gw.example.com", api_key="grl_key")
     assert client._custom_headers["X-LLM-API-Key"] == "sk-ant-key"
 
 
@@ -233,7 +234,7 @@ def test_wrap_explicit_llm_api_key_wins():
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
     client.api_key = "sk-from-client"
-    flintai_sdk.wrap(
+    flintai.wrap(
         client,
         gateway_url="https://gw.example.com",
         api_key="grl_key",
@@ -247,18 +248,16 @@ def test_wrap_no_api_key_on_client_raises():
     with pytest.raises(
         ValueError, match="gateway_url, api_key, and llm_api_key are all required"
     ):
-        flintai_sdk.wrap(
-            client, gateway_url="https://gw.example.com", api_key="grl_key"
-        )
+        flintai.wrap(client, gateway_url="https://gw.example.com", api_key="grl_key")
 
 
 def test_wrap_with_guardrails_params_auto_inits():
-    flintai_sdk.shutdown()
+    flintai.shutdown()
     assert core._client is None
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
     client.api_key = "sk-test"
-    flintai_sdk.wrap(client, gateway_url="https://gw.example.com", api_key="grl_key")
+    flintai.wrap(client, gateway_url="https://gw.example.com", api_key="grl_key")
     assert core._client is not None
     assert client._base_url == "https://gw.example.com/openai"
 
@@ -267,16 +266,16 @@ def test_wrap_partial_guardrails_params_raises():
     with pytest.raises(
         ValueError, match="gateway_url, api_key, and llm_api_key are all required"
     ):
-        flintai_sdk.wrap(
+        flintai.wrap(
             _make_mock_client("openai._client", "OpenAI", "openai"),
             gateway_url="https://gw.example.com",
         )
 
 
 def test_wrap_unknown_client_raises():
-    flintai_sdk.init()
+    flintai.init()
     with pytest.raises(TypeError, match="Unrecognized client type"):
-        flintai_sdk.wrap({"not": "a client"})
+        flintai.wrap({"not": "a client"})
 
 
 def test_wrap_preserves_user_api_key(monkeypatch):
@@ -288,7 +287,7 @@ def test_wrap_preserves_user_api_key(monkeypatch):
     sc.guardrails_config = _guardrails_config("anthropic")
     monkeypatch.setattr(core, "_client", sc)
 
-    flintai_sdk.wrap(client)
+    flintai.wrap(client)
 
     assert client.api_key == "sk-real-key"
 
@@ -503,6 +502,33 @@ def test_unwrap_langchain_missing_attr_raises():
         _unwrap_langchain_model(model)
 
 
+# --- _get_sdk_headers ---
+
+
+def test_get_sdk_headers_openai():
+    client = MagicMock()
+    client._custom_headers = {"existing": "header"}
+    assert _get_sdk_headers(client, "openai") is client._custom_headers
+
+
+def test_get_sdk_headers_anthropic():
+    client = MagicMock()
+    client._custom_headers = {}
+    assert _get_sdk_headers(client, "anthropic") is client._custom_headers
+
+
+def test_get_sdk_headers_google():
+    client = MagicMock()
+    client._api_client._http_options.headers = {"X-API-Key": "test"}
+    assert (
+        _get_sdk_headers(client, "google") is client._api_client._http_options.headers
+    )
+
+
+def test_get_sdk_headers_unknown_provider():
+    assert _get_sdk_headers(MagicMock(), "unknown") is None
+
+
 @pytest.mark.parametrize(
     "langchain_module,class_name,inner_attr,inner_provider",
     [
@@ -576,7 +602,7 @@ def test_wrap_langchain_auto_extracts_api_key():
     inner_client._base_url = "https://api.openai.com"
     inner_client.api_key = "sk-from-langchain"
 
-    flintai_sdk.wrap(model, gateway_url="https://gw.example.com", api_key="grl_key")
+    flintai.wrap(model, gateway_url="https://gw.example.com", api_key="grl_key")
     assert inner_client._custom_headers["X-LLM-API-Key"] == "sk-from-langchain"
 
 
@@ -590,7 +616,7 @@ def test_wrap_langchain_with_policy_id():
     inner_client._base_url = "https://api.openai.com"
     inner_client.api_key = "sk-test"
 
-    flintai_sdk.wrap(
+    flintai.wrap(
         model,
         gateway_url="https://gw.example.com",
         api_key="grl_key",
@@ -615,7 +641,7 @@ def test_shutdown_clears_wrapped_tracking(monkeypatch):
     wrap_client(client)
     assert _is_wrapped(client)
 
-    flintai_sdk.shutdown()
+    flintai.shutdown()
 
     monkeypatch.setattr(core, "_client", FlintAIClient(provider="openai"))
     assert not _is_wrapped(client)
@@ -653,7 +679,7 @@ def test_unhashable_client_expired_ref():
     client = _make_unhashable_client("openai._client", "OpenAI")
     _mark_wrapped(client)
 
-    from flintai_sdk.plugins._llm_wrapper import _wrapped_client_id_refs
+    from flintai.plugins._llm_wrapper import _wrapped_client_id_refs
 
     client_id = id(client)
     assert client_id in _wrapped_client_id_refs
@@ -709,7 +735,7 @@ def test_wrap_from_env_vars(monkeypatch):
     monkeypatch.setenv("FLINTAI_LLM_API_KEY", "env-llm-key")
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
-    flintai_sdk.wrap(client)
+    flintai.wrap(client)
     assert client._base_url == "https://gw.env.com/openai"
     assert client._custom_headers["X-FlintAI-API-Key"] == "env-api-key"
     assert client._custom_headers["X-LLM-API-Key"] == "env-llm-key"
@@ -722,7 +748,7 @@ def test_wrap_env_llm_key_beats_client_auto_extract(monkeypatch):
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
     client.api_key = "sk-from-client"
-    flintai_sdk.wrap(client)
+    flintai.wrap(client)
     assert client._custom_headers["X-LLM-API-Key"] == "env-llm-key"
 
 
@@ -732,7 +758,7 @@ def test_wrap_explicit_beats_env(monkeypatch):
     monkeypatch.setenv("FLINTAI_LLM_API_KEY", "env-llm-key")
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
-    flintai_sdk.wrap(
+    flintai.wrap(
         client,
         gateway_url="https://explicit.com",
         api_key="explicit-key",
@@ -749,5 +775,5 @@ def test_wrap_auto_extract_when_no_env_llm_key(monkeypatch):
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
     client.api_key = "sk-from-client"
-    flintai_sdk.wrap(client)
+    flintai.wrap(client)
     assert client._custom_headers["X-LLM-API-Key"] == "sk-from-client"

@@ -6,8 +6,8 @@ import atexit
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
-from flintai_sdk.core import FlintAIClient
-from flintai_sdk.plugins import FlintAIPlugin
+from flintai.core import FlintAIClient
+from flintai.plugins import FlintAIPlugin
 
 try:
     __version__ = version("flintai-sdk-py")
@@ -29,7 +29,7 @@ _atexit_registered = False
 
 def _ensure_client() -> None:
     """Ensure a FlintAIClient exists without configuring guardrails."""
-    from flintai_sdk import core
+    from flintai import core
 
     if core._client is not None:
         return
@@ -49,7 +49,7 @@ def _configure_guardrails_from_params(
     policy_id: str | None,
 ) -> None:
     """Validate and apply guardrails params if any are provided."""
-    from flintai_sdk.guardrails import (
+    from flintai.guardrails import (
         check_optional_guardrails_params,
         configure_guardrails,
         resolve_from_env,
@@ -85,8 +85,8 @@ def init(
 
     Not thread-safe. Call from the main thread only.
     """
-    from flintai_sdk import core
-    from flintai_sdk.guardrails import PROVIDER_PATH_MAP
+    from flintai import core
+    from flintai.guardrails import PROVIDER_PATH_MAP
 
     if provider is not None and provider not in PROVIDER_PATH_MAP:
         raise ValueError(
@@ -112,10 +112,10 @@ def init(
 
 def register_plugin(plugin: FlintAIPlugin) -> None:
     """Register a plugin with the active FlintAI SDK client."""
-    from flintai_sdk import core
+    from flintai import core
 
     if core._client is None:
-        raise RuntimeError("Call flintai_sdk.init() before registering plugins")
+        raise RuntimeError("Call flintai.init() before registering plugins")
     core._client.register_plugin(plugin)
 
 
@@ -134,8 +134,8 @@ def wrap(
     Auto-initializes FlintAI SDK if not already initialized.
     Returns the same client instance, mutated in place.
     """
-    from flintai_sdk.guardrails import resolve_from_env
-    from flintai_sdk.plugins._llm_wrapper import wrap_client
+    from flintai.guardrails import resolve_from_env
+    from flintai.plugins._llm_wrapper import wrap_client
 
     _ensure_client()
 
@@ -163,8 +163,8 @@ def wrap(
 
 def shutdown() -> None:
     """Shutdown FlintAI SDK, notify all plugins."""
-    from flintai_sdk import core
-    from flintai_sdk.plugins._llm_wrapper import _clear_wrapped
+    from flintai import core
+    from flintai.plugins._llm_wrapper import _clear_wrapped
 
     if core._client:
         core._client.shutdown()

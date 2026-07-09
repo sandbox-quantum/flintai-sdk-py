@@ -1,9 +1,9 @@
-"""Tests for error paths in flintai_sdk.guardrails."""
+"""Tests for error paths in flintai.guardrails."""
 
 import pytest
-from flintai_sdk import core
-from flintai_sdk.core import FlintAIClient
-from flintai_sdk.guardrails import (
+from flintai import core
+from flintai.core import FlintAIClient
+from flintai.guardrails import (
     GuardrailsConfig,
     build_guardrails_config,
     configure_guardrails,
@@ -39,7 +39,7 @@ def test_unsupported_provider_raises():
 
 def test_configure_without_client(monkeypatch):
     monkeypatch.setattr(core, "_client", None)
-    with pytest.warns(UserWarning, match="called before flintai_sdk.init"):
+    with pytest.warns(UserWarning, match="called before flintai.init"):
         config = configure_guardrails(
             gateway_url="https://gw.example.com",
             api_key="key",
@@ -375,7 +375,7 @@ def test_resolve_from_env_loads_dotenv(monkeypatch, tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("FLINTAI_API_KEY=from-dotenv\n")
     monkeypatch.chdir(tmp_path)
-    from flintai_sdk import guardrails
+    from flintai import guardrails
 
     guardrails._dotenv_loaded = False
     gw, api, llm, pol = resolve_from_env()

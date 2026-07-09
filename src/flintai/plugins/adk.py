@@ -6,15 +6,12 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any
 
-from flintai_sdk.plugins import FlintAIPlugin
-from flintai_sdk.plugins._provider_base import (
-    _resolve_on_init,
-    _validate_and_build_config,
-)
+from flintai.plugins import FlintAIPlugin
+from flintai.plugins._provider_base import _resolve_on_init, _validate_and_build_config
 
 if TYPE_CHECKING:
-    from flintai_sdk.core import FlintAIClient
-    from flintai_sdk.guardrails import GuardrailsConfig
+    from flintai.core import FlintAIClient
+    from flintai.guardrails import GuardrailsConfig
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +20,7 @@ class ADKGuardrailsPlugin(FlintAIPlugin):
     """Applies guardrails proxy config to a Google ADK agent.
 
     Usage:
-        from flintai_sdk.plugins.adk import ADKGuardrailsPlugin
+        from flintai.plugins.adk import ADKGuardrailsPlugin
         from google.adk import Agent
 
         plugin = ADKGuardrailsPlugin(
@@ -102,13 +99,19 @@ class ADKGuardrailsPlugin(FlintAIPlugin):
 
         headers = config.http_options.headers
 
-        if "X-Agent-Id" not in headers:
-            agent_id = os.environ.get("AGENT_ID")
-            if not agent_id:
+        if "X-Agent-Name" not in headers:
+            agent_name = os.environ.get("AGENT_NAME")
+            if not agent_name:
                 try:
-                    agent_id = callback_context.agent_name
+                    agent_name = callback_context.agent_name
                 except (AttributeError, TypeError):
                     logger.debug("failed to extract agent name from callback context")
+
+            if agent_name:
+                headers["X-Agent-Name"] = agent_name
+
+        if "X-Agent-Id" not in headers:
+            agent_id = os.environ.get("AGENT_ID")
             if agent_id:
                 headers["X-Agent-Id"] = agent_id
 

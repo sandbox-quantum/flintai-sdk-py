@@ -3,9 +3,9 @@
 import sys
 from unittest.mock import MagicMock, patch
 
-import flintai_sdk
+import flintai
 import pytest
-from flintai_sdk.plugins.adk import ADKGuardrailsPlugin
+from flintai.plugins.adk import ADKGuardrailsPlugin
 
 
 def _mock_genai():
@@ -64,14 +64,14 @@ def mock_adk_modules():
 
 
 def test_adk_plugin_creates_content_config(mock_genai_modules):
-    flintai_sdk.init(
+    flintai.init(
         provider="google",
         gateway_url="https://guardrails.example.com",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
     plugin = ADKGuardrailsPlugin()
-    flintai_sdk.register_plugin(plugin)
+    flintai.register_plugin(plugin)
 
     assert plugin.content_config is not None
     assert (
@@ -143,9 +143,9 @@ def test_adk_plugin_on_init_with_constructor_config(mock_genai_modules, caplog):
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
-    client = flintai_sdk.init(provider="google")
+    client = flintai.init(provider="google")
     with caplog.at_level(logging.INFO):
-        flintai_sdk.register_plugin(plugin)
+        flintai.register_plugin(plugin)
     assert client.guardrails_config is plugin._config
     assert "will route through" in caplog.text
 
@@ -158,23 +158,23 @@ def test_adk_plugin_partial_params_raises():
 
 
 def test_adk_plugin_no_guardrails_config(caplog):
-    flintai_sdk.init(provider="google")
+    flintai.init(provider="google")
     plugin = ADKGuardrailsPlugin()
-    flintai_sdk.register_plugin(plugin)
+    flintai.register_plugin(plugin)
 
     assert plugin.content_config is None
     assert "No guardrails config found" in caplog.text
 
 
 def test_adk_plugin_openai_provider(mock_genai_modules):
-    flintai_sdk.init(
+    flintai.init(
         provider="openai",
         gateway_url="https://gw.example.com",
         api_key="grl_key",
         llm_api_key="sk-test",
     )
     plugin = ADKGuardrailsPlugin()
-    flintai_sdk.register_plugin(plugin)
+    flintai.register_plugin(plugin)
 
     assert (
         plugin.content_config.http_options.base_url == "https://gw.example.com/openai/"
@@ -233,7 +233,7 @@ def test_on_model_error_non_blocked_reraises(mock_adk_modules):
 # --- before_model_callback ---
 
 
-def test_before_model_callback_injects_agent_id_and_session_id(mock_genai_modules):
+def test_before_model_callback_injects_agent_name_and_session_id(mock_genai_modules):
     plugin = ADKGuardrailsPlugin(
         gateway_url="https://guardrails.example.com",
         api_key="grl_sk_test",
@@ -250,7 +250,7 @@ def test_before_model_callback_injects_agent_id_and_session_id(mock_genai_module
     assert result is None
     headers = llm_request.config.http_options.headers
     assert headers["X-Agent-Session-Id"] == "sess-abc-123"
-    assert headers["X-Agent-Id"] == "search_agent"
+    assert headers["X-Agent-Name"] == "search_agent"
     assert headers["X-FlintAI-API-Key"] == "grl_sk_test"
 
 
@@ -268,13 +268,13 @@ def test_before_model_callback_no_agent_name(mock_genai_modules):
     result = plugin.before_model_callback(ctx, llm_request)
 
     assert result is None
-    assert "X-Agent-Id" not in llm_request.config.http_options.headers
+    assert "X-Agent-Name" not in llm_request.config.http_options.headers
     assert (
         llm_request.config.http_options.headers["X-Agent-Session-Id"] == "sess-abc-123"
     )
 
 
-def test_before_model_callback_static_agent_id_takes_precedence(mock_genai_modules):
+def test_before_model_callback_static_agent_name_takes_precedence(mock_genai_modules):
     plugin = ADKGuardrailsPlugin(
         gateway_url="https://guardrails.example.com",
         api_key="grl_sk_test",
@@ -286,12 +286,12 @@ def test_before_model_callback_static_agent_id_takes_precedence(mock_genai_modul
     llm_request = MagicMock()
     llm_request.config.http_options.headers = {
         "X-FlintAI-API-Key": "grl_sk_test",
-        "X-Agent-Id": "static_override",
+        "X-Agent-Name": "static_override",
     }
 
     plugin.before_model_callback(ctx, llm_request)
 
-    assert llm_request.config.http_options.headers["X-Agent-Id"] == "static_override"
+    assert llm_request.config.http_options.headers["X-Agent-Name"] == "static_override"
 
 
 def test_before_model_callback_no_session(mock_genai_modules):
@@ -309,7 +309,7 @@ def test_before_model_callback_no_session(mock_genai_modules):
 
     assert result is None
     assert "X-Agent-Session-Id" not in llm_request.config.http_options.headers
-    assert llm_request.config.http_options.headers["X-Agent-Id"] == "search_agent"
+    assert llm_request.config.http_options.headers["X-Agent-Name"] == "search_agent"
 
 
 def test_before_model_callback_config_none(mock_genai_modules):
@@ -361,13 +361,13 @@ def test_before_model_callback_headers_none(mock_genai_modules):
     assert result is None
     headers = llm_request.config.http_options.headers
     assert headers["X-Agent-Session-Id"] == "sess-abc-123"
-    assert headers["X-Agent-Id"] == "search_agent"
+    assert headers["X-Agent-Name"] == "search_agent"
 
 
-def test_before_model_callback_agent_id_env_var_takes_priority(
+def test_before_model_callback_agent_name_env_var_takes_priority(
     mock_genai_modules, monkeypatch
 ):
-    monkeypatch.setenv("AGENT_ID", "env-agent-id")
+    monkeypatch.setenv("AGENT_NAME", "env-agent-name")
     plugin = ADKGuardrailsPlugin(
         gateway_url="https://guardrails.example.com",
         api_key="grl_sk_test",
@@ -381,7 +381,49 @@ def test_before_model_callback_agent_id_env_var_takes_priority(
 
     plugin.before_model_callback(ctx, llm_request)
 
-    assert llm_request.config.http_options.headers["X-Agent-Id"] == "env-agent-id"
+    assert llm_request.config.http_options.headers["X-Agent-Name"] == "env-agent-name"
+
+
+def test_before_model_callback_agent_id_env_var_in_header_when_provided(
+    mock_genai_modules, monkeypatch
+):
+    monkeypatch.setenv("AGENT_ID", "custom-agent-id")
+    plugin = ADKGuardrailsPlugin(
+        gateway_url="https://guardrails.example.com",
+        api_key="grl_sk_test",
+        llm_api_key="AIzaSy_test",
+    )
+    ctx = MagicMock()
+    ctx.agent_name = "search_agent"
+    ctx.session.id = "sess-1"
+    llm_request = MagicMock()
+    llm_request.config.http_options.headers = {}
+
+    plugin.before_model_callback(ctx, llm_request)
+
+    assert llm_request.config.http_options.headers["X-Agent-Id"] == "custom-agent-id"
+    assert llm_request.config.http_options.headers["X-Agent-Name"] == "search_agent"
+
+
+def test_before_model_callback_agent_id_env_var_not_in_header_when_not_provided(
+    mock_genai_modules, monkeypatch
+):
+    # we won't set up anything into the monkeypath variable
+    plugin = ADKGuardrailsPlugin(
+        gateway_url="https://guardrails.example.com",
+        api_key="grl_sk_test",
+        llm_api_key="AIzaSy_test",
+    )
+    ctx = MagicMock()
+    ctx.agent_name = "search_agent"
+    ctx.session.id = "sess-1"
+    llm_request = MagicMock()
+    llm_request.config.http_options.headers = {}
+
+    plugin.before_model_callback(ctx, llm_request)
+
+    assert "X-Agent-Id" not in llm_request.config.http_options.headers
+    assert llm_request.config.http_options.headers["X-Agent-Name"] == "search_agent"
 
 
 # --- Environment variable configuration ---

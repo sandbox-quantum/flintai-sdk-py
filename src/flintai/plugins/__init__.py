@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from flintai_sdk.core import FlintAIClient
+    from flintai.core import FlintAIClient
 
 __all__ = ["FlintAIPlugin"]
 

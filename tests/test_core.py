@@ -1,8 +1,8 @@
-"""Unit tests for flintai_sdk.core.FlintAIClient."""
+"""Unit tests for flintai.core.FlintAIClient."""
 
 from unittest.mock import MagicMock
 
-from flintai_sdk.core import FlintAIClient
+from flintai.core import FlintAIClient
 
 
 def test_construction_defaults():
@@ -43,7 +43,7 @@ def test_notify_behavior():
 
 
 def test_shutdown_full_behavior():
-    from flintai_sdk.guardrails import GuardrailsConfig
+    from flintai.guardrails import GuardrailsConfig
 
     client = FlintAIClient()
     plugin = MagicMock()
@@ -63,7 +63,7 @@ def test_shutdown_full_behavior():
 
 
 def test_flintai_client_repr():
-    from flintai_sdk.plugins import FlintAIPlugin
+    from flintai.plugins import FlintAIPlugin
 
     client = FlintAIClient(provider="openai")
     plugin = MagicMock(spec=FlintAIPlugin)
@@ -76,7 +76,7 @@ def test_flintai_client_repr():
 
 
 def test_bare_plugin_noop_methods():
-    from flintai_sdk.plugins import FlintAIPlugin
+    from flintai.plugins import FlintAIPlugin
 
     plugin = FlintAIPlugin()
     plugin.on_init(MagicMock())
@@ -90,7 +90,7 @@ def test_bare_plugin_noop_methods():
 def test_notify_exception_is_caught(caplog):
     import logging
 
-    from flintai_sdk.plugins import FlintAIPlugin
+    from flintai.plugins import FlintAIPlugin
 
     class FailingPlugin(FlintAIPlugin):
         name = "failing"
@@ -102,7 +102,7 @@ def test_notify_exception_is_caught(caplog):
     plugin_ok = MagicMock()
     client.plugins = [FailingPlugin(), plugin_ok]
 
-    with caplog.at_level(logging.WARNING, logger="flintai_sdk.core"):
+    with caplog.at_level(logging.WARNING, logger="flintai.core"):
         client.notify("on_shutdown")
 
     plugin_ok.on_shutdown.assert_called_once()

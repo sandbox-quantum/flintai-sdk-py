@@ -1,8 +1,8 @@
 """Shared fixtures for FlintAI SDK tests."""
 
-import flintai_sdk
+import flintai
 import pytest
-from flintai_sdk import guardrails
+from flintai import guardrails
 
 _FLINTAI_ENV_VARS = [
     "FLINTAI_GATEWAY_URL",
@@ -18,5 +18,5 @@ def _reset_flintai(monkeypatch):
         monkeypatch.delenv(var, raising=False)
     guardrails._dotenv_loaded = True
     yield
-    flintai_sdk.shutdown()
+    flintai.shutdown()
     guardrails._dotenv_loaded = False
