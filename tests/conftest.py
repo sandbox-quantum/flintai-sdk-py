@@ -1,7 +1,8 @@
 """Shared fixtures for FlintAI SDK tests."""
 
-import flintai
 import pytest
+
+import flintai
 from flintai import guardrails
 
 _FLINTAI_ENV_VARS = [

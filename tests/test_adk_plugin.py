@@ -3,8 +3,9 @@
 import sys
 from unittest.mock import MagicMock, patch
 
-import flintai
 import pytest
+
+import flintai
 from flintai.plugins.adk import ADKGuardrailsPlugin
 
 

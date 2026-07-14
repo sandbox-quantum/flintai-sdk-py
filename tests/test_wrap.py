@@ -4,8 +4,9 @@ import logging
 import sys
 from unittest.mock import MagicMock
 
-import flintai
 import pytest
+
+import flintai
 from flintai import core
 from flintai.core import FlintAIClient
 from flintai.guardrails import GuardrailsConfig

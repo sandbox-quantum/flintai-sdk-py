@@ -2,8 +2,9 @@
 
 from unittest.mock import MagicMock
 
-import flintai
 import pytest
+
+import flintai
 from flintai.plugins import FlintAIPlugin
 
 

@@ -2,8 +2,9 @@
 
 from unittest.mock import MagicMock, patch
 
-import flintai
 import pytest
+
+import flintai
 from flintai.plugins.langchain import LangChainGuardrailsMiddleware, _extract_thread_id
 
 # ---------------------------------------------------------------------------
