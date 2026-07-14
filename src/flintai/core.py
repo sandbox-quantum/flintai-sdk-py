@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from flintai_sdk.plugins import FlintAIPlugin
+from flintai.plugins import FlintAIPlugin
 
 if TYPE_CHECKING:
-    from flintai_sdk.guardrails import GuardrailsConfig
+    from flintai.guardrails import GuardrailsConfig
 
 logger = logging.getLogger(__name__)
 

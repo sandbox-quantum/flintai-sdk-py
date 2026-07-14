@@ -8,7 +8,7 @@ import weakref
 from collections.abc import Callable
 from typing import Any
 
-from flintai_sdk.guardrails import GuardrailsConfig
+from flintai.guardrails import GuardrailsConfig
 
 logger = logging.getLogger(__name__)
 
@@ -107,9 +107,9 @@ def _detect_client_type(client: Any) -> str:
 
     if module.startswith("google.adk"):
         raise TypeError(
-            "ADK agents cannot be wrapped with flintai_sdk.wrap(). "
+            "ADK agents cannot be wrapped with flintai.wrap(). "
             "Use ADKGuardrailsPlugin instead:\n"
-            "    from flintai_sdk.plugins.adk import ADKGuardrailsPlugin\n"
+            "    from flintai.plugins.adk import ADKGuardrailsPlugin\n"
             "    plugin = ADKGuardrailsPlugin(gateway_url=..., api_key=..., llm_api_key=...)\n"
             "    agent = Agent(model=..., generate_content_config=plugin.content_config, "
             "    before_model_callback=plugin.before_model_callback, "
@@ -136,19 +136,38 @@ def _resolve_base_url(provider: str, config: GuardrailsConfig) -> str:
     if config.provider:
         return config.base_url
 
-    from flintai_sdk.guardrails import PROVIDER_PATH_MAP
+    from flintai.guardrails import PROVIDER_PATH_MAP
 
     path_prefix = PROVIDER_PATH_MAP.get(provider, "")
     return config.gateway_url + path_prefix
 
 
-def _update_custom_headers(client: Any, headers: dict[str, str]) -> None:
-    """Merge guardrails headers into the client's ``_custom_headers``."""
-    if hasattr(client, "_custom_headers"):
-        client._custom_headers.update(headers)
+def _get_sdk_headers(sdk_client: Any, provider: str) -> dict[str, str] | None:
+    """Get the mutable headers dict from an SDK client.
+
+    Single source of truth for where each provider stores HTTP headers.
+    """
+    if provider in ("openai", "anthropic"):
+        return getattr(sdk_client, "_custom_headers", None)
+    if provider == "google":
+        api_client = getattr(sdk_client, "_api_client", None)
+        if api_client is None:
+            return None
+        http_options = getattr(api_client, "_http_options", None)
+        if http_options is None:
+            return None
+        return getattr(http_options, "headers", None)
+    return None
+
+
+def _merge_sdk_headers(client: Any, provider: str, headers: dict[str, str]) -> None:
+    """Merge *headers* into the SDK client's header dict."""
+    sdk_headers = _get_sdk_headers(client, provider)
+    if sdk_headers is not None:
+        sdk_headers.update(headers)
     else:
         logger.warning(
-            "Cannot set custom headers on %s: _custom_headers not found. "
+            "Cannot set custom headers on %s: headers dict not found. "
             "Guardrails auth headers will not be applied.",
             type(client).__name__,
         )
@@ -169,7 +188,7 @@ def _apply_anthropic_config(
         client._base_url = URL(base_url)
     except ImportError:
         client._base_url = base_url
-    _update_custom_headers(client, headers)
+    _merge_sdk_headers(client, "anthropic", headers)
 
 
 def _apply_openai_config(client: Any, base_url: str, headers: dict[str, str]) -> None:
@@ -185,7 +204,7 @@ def _apply_openai_config(client: Any, base_url: str, headers: dict[str, str]) ->
             f"Cannot set base_url on {type(client).__name__}: "
             f"no known attribute found"
         )
-    _update_custom_headers(client, headers)
+    _merge_sdk_headers(client, "openai", headers)
 
 
 def _apply_google_config(client: Any, base_url: str, headers: dict[str, str]) -> None:
@@ -204,7 +223,7 @@ def _apply_google_config(client: Any, base_url: str, headers: dict[str, str]) ->
         )
     # Google GenAI SDK requires trailing slash; without it, URL joining drops the last segment
     http_options.base_url = base_url.rstrip("/") + "/"
-    http_options.headers.update(headers)
+    _merge_sdk_headers(client, "google", headers)
 
 
 _PROVIDER_APPLIERS: dict[str, Callable[[Any, str, dict[str, str]], None]] = {
@@ -232,7 +251,7 @@ def wrap_client(client: Any) -> Any:
     LangChain chat models wrapping one of these).
     Returns the same client instance, mutated in place.
     """
-    from flintai_sdk.core import _client as flintai_client
+    from flintai.core import _client as flintai_client
 
     if _is_wrapped(client):
         logger.warning("Client is already wrapped by FlintAI SDK; skipping.")

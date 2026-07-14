@@ -194,7 +194,7 @@ def configure_guardrails(
     provider: str | None = None,
     policy_id: str | None = None,
 ) -> GuardrailsConfig:
-    from flintai_sdk import core
+    from flintai import core
 
     if provider is None and core._client:
         provider = core._client.provider
@@ -214,9 +214,9 @@ def configure_guardrails(
         core._client.guardrails_config = config
     else:
         warnings.warn(
-            "configure_guardrails() called before flintai_sdk.init(). "
+            "configure_guardrails() called before flintai.init(). "
             "The config will not be attached to any client. "
-            "Call flintai_sdk.init() first, or pass this config manually.",
+            "Call flintai.init() first, or pass this config manually.",
             stacklevel=2,
         )
 

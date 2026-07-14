@@ -1,3 +1,3 @@
 env/
 .adk/
-adk/expenses.db
+adk/expense_tracker/expenses.db

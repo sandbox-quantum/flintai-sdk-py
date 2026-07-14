@@ -8,6 +8,7 @@ import sqlite3
 from datetime import datetime
 from typing import Optional
 
+from flintai.plugins.adk import ADKGuardrailsPlugin
 from google.adk.agents import LlmAgent
 
 # Database setup
@@ -205,12 +206,17 @@ When asked about spending:
 
 Use get_current_date to look up today's date when needed."""
 
+    plugin = ADKGuardrailsPlugin()
+
     agent = LlmAgent(
         name="expense_tracker",
         model="gemini-3-flash-preview",
         instruction=system_instruction,
         description="An AI assistant that helps users track and analyze their expenses",
         tools=[get_current_date, add_expense, get_monthly_spending, search_expenses],
+        generate_content_config=plugin.content_config,
+        before_model_callback=plugin.before_model_callback,
+        on_model_error_callback=plugin.on_model_error,
     )
 
     return agent

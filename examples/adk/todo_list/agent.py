@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from flintai_sdk.plugins.adk import ADKGuardrailsPlugin
+from flintai.plugins.adk import ADKGuardrailsPlugin
 from google import adk
 from google.adk.agents import LlmAgent
 from google.adk.sessions import InMemorySessionService
