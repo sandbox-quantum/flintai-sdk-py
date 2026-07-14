@@ -6,9 +6,14 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any
 
+from flintai.guardrails import FlintAIGuardrailsError
 from flintai.plugins import FlintAIPlugin
 from flintai.plugins._llm_wrapper import _get_sdk_headers
-from flintai.plugins._provider_base import _resolve_on_init, _validate_and_build_config
+from flintai.plugins._provider_base import (
+    _resolve_on_init,
+    _validate_and_build_config,
+    effective_require_guardrails,
+)
 
 if TYPE_CHECKING:
     from flintai.core import FlintAIClient
@@ -87,6 +92,7 @@ class LangChainGuardrailsMiddleware(FlintAIPlugin, _LangChainMiddleware):
         api_key: str | None = None,
         llm_api_key: str | None = None,
         policy_id: str | None = None,
+        require_guardrails: bool | None = None,
     ) -> None:
         self._config: GuardrailsConfig | None
         self._config, self._config_from_constructor = _validate_and_build_config(
@@ -96,13 +102,19 @@ class LangChainGuardrailsMiddleware(FlintAIPlugin, _LangChainMiddleware):
             provider=None,
             policy_id=policy_id,
         )
+        self._require_guardrails = require_guardrails
         self._routed = False
         self._sdk_client: Any = None
         self._provider: str | None = None
 
     def on_init(self, client: FlintAIClient) -> None:
+        if self._require_guardrails is None:
+            self._require_guardrails = client.require_guardrails
         self._config = _resolve_on_init(
-            client, self._config, self._config_from_constructor
+            client,
+            self._config,
+            self._config_from_constructor,
+            self._require_guardrails,
         )
 
     def wrap_model_call(self, request: Any, handler: Any) -> Any:
@@ -119,42 +131,73 @@ class LangChainGuardrailsMiddleware(FlintAIPlugin, _LangChainMiddleware):
         return handler(request)
 
     def _setup_routing(self, model: Any) -> None:
-        """Apply guardrails proxy routing to the underlying SDK client (once)."""
+        """Apply guardrails proxy routing to the underlying SDK client (once).
+
+        Raises ``TypeError`` if the underlying SDK client cannot be extracted
+        or configured — fail-closed so that guardrails are never silently
+        bypassed.
+        """
         from flintai.plugins._llm_wrapper import (
             _apply_guardrails_config,
             _unwrap_langchain_model,
         )
 
-        try:
-            result = _unwrap_langchain_model(model)
-        except TypeError:
-            result = None
+        require = effective_require_guardrails(self._require_guardrails)
+
+        result = _unwrap_langchain_model(model)
 
         if result is None:
+            if require:
+                raise FlintAIGuardrailsError(
+                    f"Cannot extract SDK client from "
+                    f"{type(model).__name__}; "
+                    "guardrails routing cannot be applied."
+                )
             logger.debug(
-                "Cannot extract SDK client from %s; "
-                "guardrails routing and session headers will not be applied",
+                "Cannot extract SDK client from %s; guardrails "
+                "routing and session headers will not be applied.",
                 type(model).__name__,
             )
-            self._routed = True
             return
 
         self._sdk_client, self._provider = result
 
-        if self._config is not None:
-            _apply_guardrails_config(self._sdk_client, self._provider, self._config)
+        if self._config is None:
+            if require:
+                raise FlintAIGuardrailsError(
+                    "Guardrails configuration is required but no config was found. "
+                    "Pass gateway_url and api_key to the middleware "
+                    "constructor or to flintai.init()."
+                )
+            logger.warning(
+                "No guardrails config found; routing not applied for %s.",
+                type(model).__name__,
+            )
+        else:
+            _apply_guardrails_config(
+                self._sdk_client,
+                self._provider,
+                self._config,
+                require,
+            )
 
         self._routed = True
 
     def _inject_headers(self, thread_id: str | None) -> None:
-        """Set session and agent identity headers on the SDK client."""
+        """Set session and agent identity headers on the SDK client.
+
+        Raises ``TypeError`` if the headers dict cannot be located — fail-closed
+        so that session/agent identity is never silently dropped.
+        """
+        # Only invoked once routing is set up, so the provider is resolved.
+        assert self._provider is not None
         headers = _get_sdk_headers(self._sdk_client, self._provider)
         if headers is None:
-            logger.debug(
-                "Cannot access headers on %s SDK client",
-                self._provider,
+            raise TypeError(
+                f"Cannot access headers on {self._provider} SDK client "
+                f"({type(self._sdk_client).__name__}): headers dict not found. "
+                f"The SDK version may be incompatible."
             )
-            return
 
         if thread_id is not None:
             headers["X-Agent-Session-Id"] = thread_id

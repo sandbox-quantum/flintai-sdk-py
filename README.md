@@ -140,7 +140,7 @@ agent = Agent(
 )
 ```
 
-`before_model_callback` automatically extracts agent identity and session metadata on each LLM call — it reads the agent name from the ADK callback context and attaches `X-Agent-Id` and `X-Agent-Session-Id` headers to the guardrails request. `on_model_error_callback` converts guardrails blocks (403 / keyword match) into an `LlmResponse` so the agent can handle them gracefully.
+`before_model_callback` automatically extracts agent identity and session metadata on each LLM call — it reads the agent name from the ADK callback context and attaches `X-Agent-Id` and `X-Agent-Session-Id` headers to the guardrails request. It fails closed: if guardrails routing was never applied (the request has no `http_options`), it raises `FlintAIGuardrailsError` rather than sending an unguarded request — pass `require_guardrails=False` to the plugin for best-effort behavior. `on_model_error_callback` converts guardrails blocks (detected via the `GUARDRAIL_BLOCKED` error code) into an `LlmResponse` so the agent can handle them gracefully.
 
 ## Configuration Reference
 
@@ -150,8 +150,11 @@ agent = Agent(
 |-----------|------|-------------|
 | `gateway_url` | `str` | Guardrails proxy URL |
 | `api_key` | `str` | Your guardrails API key |
-| `llm_api_key` | `str \| None` | Your upstream LLM provider API key. In `wrap()`, auto-extracted from `client.api_key` for OpenAI, Anthropic, and LangChain models wrapping them. Required for Google GenAI and `init()`. |
+| `llm_api_key` | `str \| None` | Your upstream LLM provider API key, forwarded to the gateway as `X-LLM-API-Key`. Optional — by default the gateway supplies its own upstream credentials, so the key is not sent. |
+| `forward_llm_key` | `bool` | `wrap()` only. When `True`, auto-extract the provider key from the client (`client.api_key`) and forward it. Default `False` (opt-in) — the caller's key is not sent to the gateway unless requested. |
 | `policy_id` | `str \| None` | Guardrails policy ID to apply (optional) |
+
+**Fail-closed by default:** `require_guardrails` defaults to `True` on `init()`, `wrap()`, and the plugins. If guardrails can't be applied — missing config, an unrecognized client, or a plugin used standalone (e.g. passed straight to `create_agent`/`Agent` without `flintai.init()`) — a `FlintAIGuardrailsError` is raised instead of sending traffic unguarded. Pass `require_guardrails=False` to opt out.
 
 ## Environment Variables
 
@@ -164,6 +167,7 @@ Instead of passing credentials in code, you can set them as environment variable
 | `FLINTAI_LLM_API_KEY` | `llm_api_key` | Your upstream LLM provider API key |
 | `FLINTAI_POLICY_ID` | `policy_id` | Guardrails policy ID (optional) |
 | `AGENT_ID` | `agent_id` | Agent identifier attached to guardrails requests (overrides `agent_name`) |
+| `FLINTAI_ALLOWED_GATEWAY_HOSTS` | — | Comma-separated allowlist of permitted gateway hostnames. Defaults to `app.flintai.dev`; set to override (or `*` to allow any host). Loopback is always allowed. |
 
 Set the variables in your shell or in a `.env` file (requires `pip install "flintai-sdk-py[dotenv]"`):
 
@@ -184,13 +188,17 @@ client = openai.OpenAI()
 client = flintai.wrap(client)  # reads from env vars / .env file
 ```
 
-**Precedence:** Explicit parameters > environment variables > auto-extract from `client.api_key` (for `llm_api_key` in `wrap()` only).
+**Precedence:** Explicit parameters > environment variables > auto-extract from `client.api_key` (only in `wrap()`, and only when `forward_llm_key=True`).
 
 **Multiple provider keys:** If multiple provider API keys are set in the environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`), auto-detection will fail. Pass `provider` explicitly to `flintai.init()` to disambiguate.
 
+## Gateway Allowlist
+
+By default, `gateway_url` must resolve to `app.flintai.dev` (the hosted FlintAI guardrails gateway); any other host is rejected so provider keys can't be sent to an unintended endpoint. To use a self-hosted or alternate gateway, set `FLINTAI_ALLOWED_GATEWAY_HOSTS` to a comma-separated list of allowed hostnames (or `*` to disable the check). Loopback hosts (`localhost`, `127.0.0.1`, `::1`) are always allowed for local development. Plaintext `http://` is rejected except for loopback.
+
 ## How It Works
 
-1. `flintai.wrap(client, gateway_url=..., ...)` auto-detects the provider from the client type, computes the provider-specific path prefix (`/openai`, `/anthropic`, `/gemini`), rewrites the client's base URL, and injects custom headers (`X-FlintAI-API-Key`, `X-LLM-API-Key`, `X-Guardrails-Policy-Id`)
+1. `flintai.wrap(client, gateway_url=..., ...)` auto-detects the provider from the client type, computes the provider-specific path prefix (`/openai`, `/anthropic`, `/gemini`), rewrites the client's base URL, and injects custom headers (`X-FlintAI-API-Key`, `X-Guardrails-Policy-Id`, and `X-LLM-API-Key` only when a provider key is provided or `forward_llm_key=True`)
 2. The guardrails proxy intercepts the request, applies policy checks (detectors), and strips the custom headers
 3. The proxy injects the appropriate upstream auth credentials and forwards the request to the LLM provider
 
@@ -200,9 +208,9 @@ client = flintai.wrap(client)  # reads from env vars / .env file
 
 **Private attribute mutation:** `flintai.wrap()` modifies internal attributes of LLM SDK clients (`_base_url`, `_custom_headers`, `_api_client._http_options`) to redirect traffic through the guardrails proxy. These are not part of the public API of the respective SDKs and may change without notice. Pin your SDK versions to the tested ranges:
 
-- `openai>=1.0,<3`
-- `anthropic>=0.39,<2`
-- `google-genai>=0.5,<2`
+- `openai>=2.40.0,<3`
+- `anthropic>=0.105.2,<1`
+- `google-genai>=2.7,<3`
 
 **Google GenAI `api_key`:** Google GenAI clients do not expose `api_key` as an attribute. You must pass `llm_api_key=` explicitly when calling `flintai.wrap()`.
 

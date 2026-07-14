@@ -1,9 +1,11 @@
 """Tests for the FlintAI SDK library."""
 
+import warnings
 from unittest.mock import MagicMock
 
 import flintai
 import pytest
+from flintai.guardrails import FlintAIGuardrailsError, InsecureGatewayWarning
 from flintai.plugins import FlintAIPlugin
 
 
@@ -14,16 +16,16 @@ def test_actions_before_init_raise():
 
 
 def test_init_configuration():
-    client = flintai.init(provider="anthropic")
+    client = flintai.init(provider="anthropic", require_guardrails=False)
     assert client.provider == "anthropic"
 
 
 def test_double_init_shuts_down_previous():
-    first = flintai.init()
+    first = flintai.init(require_guardrails=False)
     plugin = MagicMock()
     first.register_plugin(plugin)
 
-    flintai.init()
+    flintai.init(require_guardrails=False)
 
     plugin.on_shutdown.assert_called_once()
 
@@ -34,18 +36,18 @@ def test_version_is_available():
 
 
 def test_shutdown_idempotent():
-    flintai.init()
+    flintai.init(require_guardrails=False)
     flintai.shutdown()
     flintai.shutdown()
 
 
 def test_reinit_after_shutdown():
-    first = flintai.init()
+    first = flintai.init(require_guardrails=False)
     assert first is not None
 
     flintai.shutdown()
 
-    second = flintai.init()
+    second = flintai.init(require_guardrails=False)
     assert second is not None
 
 
@@ -84,9 +86,7 @@ def test_init_with_guardrails_policy_id():
 
 
 def test_init_partial_guardrails_params_raises():
-    with pytest.raises(
-        ValueError, match="gateway_url, api_key, and llm_api_key are all required"
-    ):
+    with pytest.raises(ValueError, match="gateway_url and api_key are both required"):
         flintai.init(gateway_url="https://gw.example.com")
 
 
@@ -137,16 +137,21 @@ def test_init_explicit_overrides_env(monkeypatch):
     assert client.guardrails_config.headers["X-LLM-API-Key"] == "explicit-llm-key"
 
 
+def test_init_no_config_raises_by_default():
+    with pytest.raises(
+        FlintAIGuardrailsError, match="Guardrails configuration is required"
+    ):
+        flintai.init()
+
+
 def test_init_no_env_no_params_skips_guardrails():
-    client = flintai.init()
+    client = flintai.init(require_guardrails=False)
     assert client.guardrails_config is None
 
 
 def test_init_partial_env_raises(monkeypatch):
     monkeypatch.setenv("FLINTAI_GATEWAY_URL", "https://gw.env.com")
-    with pytest.raises(
-        ValueError, match="gateway_url, api_key, and llm_api_key are all required"
-    ):
+    with pytest.raises(ValueError, match="gateway_url and api_key are both required"):
         flintai.init()
 
 
@@ -157,3 +162,38 @@ def test_init_policy_id_from_env(monkeypatch):
     monkeypatch.setenv("FLINTAI_POLICY_ID", "env-pol-1")
     client = flintai.init()
     assert client.guardrails_config.headers["X-Guardrails-Policy-Id"] == "env-pol-1"
+
+
+def test_init_without_llm_api_key():
+    client = flintai.init(
+        gateway_url="https://gw.example.com",
+        api_key="grl_key",
+    )
+    assert client.guardrails_config is not None
+    assert client.guardrails_config.headers["X-FlintAI-API-Key"] == "grl_key"
+    assert "X-LLM-API-Key" not in client.guardrails_config.headers
+
+
+# --- plaintext HTTP rejection ---
+
+
+def test_init_rejects_http_non_loopback():
+    with pytest.raises(ValueError, match="must use https://"):
+        flintai.init(
+            gateway_url="http://gw.example.com",
+            api_key="key",
+            llm_api_key="llm_key",
+        )
+
+
+def test_init_http_loopback_accepted():
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        client = flintai.init(
+            gateway_url="http://localhost:8080",
+            api_key="key",
+            llm_api_key="llm_key",
+        )
+    assert client.guardrails_config is not None
+    assert client.guardrails_config.gateway_url == "http://localhost:8080"
+    assert any(issubclass(x.category, InsecureGatewayWarning) for x in w)

@@ -1,4 +1,4 @@
-.PHONY: install install-dev test lint typecheck build clean release-audit license-check sbom vuln-scan lock-deps
+.PHONY: install install-dev test lint typecheck build clean publish release-audit license-check sbom vuln-scan secret-scan lock-deps check-metadata
 
 # ---------------------------------------------------------------------------
 # Development
@@ -30,18 +30,55 @@ build: clean
 clean:
 	rm -rf dist/ build/ *.egg-info src/*.egg-info
 
+publish: release-audit build
+	twine check dist/*
+	twine upload dist/*
+
+# ---------------------------------------------------------------------------
+# Metadata consistency (README ranges must match pyproject.toml pins)
+# ---------------------------------------------------------------------------
+
+check-metadata:
+	@echo "=== Metadata consistency check ==="
+	@errors=0; \
+	for dep in openai anthropic google-genai; do \
+		pyproject_range=$$(grep "\"$${dep}>=" pyproject.toml | sed "s/.*\"\($${dep}[^\"]*\)\".*/\1/" | head -1); \
+		readme_range=$$(grep "\`$${dep}>=" README.md | sed "s/.*\`\($${dep}[^\`]*\)\`.*/\1/" | head -1); \
+		if [ -z "$$pyproject_range" ] || [ -z "$$readme_range" ]; then \
+			echo "SKIP: $${dep} (not found in both files)"; \
+		elif [ "$$pyproject_range" != "$$readme_range" ]; then \
+			echo "FAIL: $${dep} range mismatch"; \
+			echo "  pyproject.toml: $${pyproject_range}"; \
+			echo "  README.md:      $${readme_range}"; \
+			errors=$$((errors + 1)); \
+		else \
+			echo "OK: $${dep} $${pyproject_range}"; \
+		fi; \
+	done; \
+	if [ "$$errors" -gt 0 ]; then \
+		echo ""; \
+		echo "FAILED: $$errors metadata inconsistency(ies). Update README.md to match pyproject.toml."; \
+		exit 1; \
+	fi
+	@echo "All metadata checks passed."
+	@echo ""
+
 # ---------------------------------------------------------------------------
 # Release audit (mirrors flintai-cli)
 # ---------------------------------------------------------------------------
 
-release-audit: lock-deps license-check sbom vuln-scan
+release-audit: check-metadata lock-deps license-check sbom vuln-scan secret-scan
 	@echo ""
 	@echo "=== Release audit complete ==="
 	@echo "Outputs in release/:"
 	@ls -1 release/*.json release/*.csv release/*.txt 2>/dev/null
 	@echo ""
 
-IGNORE_PACKAGES := --ignore-packages flintai-sdk-py
+# Packages whose license field carries full license text rather than a short
+# SPDX identifier (so --allow-only can't match them). Manually verified permissive:
+#   tiktoken       — MIT License
+#   flintai-sdk-py — Apache-2.0 (this project)
+IGNORE_PACKAGES := --ignore-packages flintai-sdk-py tiktoken
 
 license-check:
 	@mkdir -p release
@@ -82,6 +119,7 @@ BSD 3-Clause OR Apache-2.0;\
 3-Clause BSD License;\
 MIT License;\
 MIT;\
+MIT-0;\
 MIT OR Apache-2.0;\
 MIT-CMU;\
 ISC License (ISCL);\
@@ -123,7 +161,23 @@ vuln-scan:
 	pip-audit --desc 2>&1 | tee release/vulnerabilities.txt
 	@echo ""
 
+secret-scan:
+	@mkdir -p release
+	@echo "=== Secret scan (gitleaks) ==="
+	gitleaks detect --source . --no-git \
+		--report-path=release/gitleaks-report.json \
+		--report-format=json \
+		--exit-code 1 \
+		|| (echo "FAIL: secrets detected — see release/gitleaks-report.json" && exit 1)
+	@echo "=== Secret scan (gitleaks) - git history ==="
+	gitleaks detect --source . \
+		--report-path=release/gitleaks-history-report.json \
+		--report-format=json \
+		--exit-code 1 \
+		|| (echo "FAIL: secrets detected in git history - see release/gitleaks-history-report.json" && exit 1)
+	@echo "No secrets detected."
+
 lock-deps:
 	@echo "=== Locking dependencies ==="
-	pip-compile --strip-extras --output-file=requirements.lock pyproject.toml
+	pip-compile --all-extras --strip-extras --output-file=requirements.lock pyproject.toml
 	@echo "Locked dependencies written to requirements.lock"
