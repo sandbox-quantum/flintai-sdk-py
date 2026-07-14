@@ -6,8 +6,13 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any
 
+from flintai.guardrails import FlintAIGuardrailsError
 from flintai.plugins import FlintAIPlugin
-from flintai.plugins._provider_base import _resolve_on_init, _validate_and_build_config
+from flintai.plugins._provider_base import (
+    _resolve_on_init,
+    _validate_and_build_config,
+    effective_require_guardrails,
+)
 
 if TYPE_CHECKING:
     from flintai.core import FlintAIClient
@@ -39,9 +44,7 @@ class ADKGuardrailsPlugin(FlintAIPlugin):
 
     name = "adk-guardrails"
     _PROVIDER = "google"
-    # Best-effort heuristic for detecting guardrails blocks from error messages.
-    # TODO(CHOO-245): Replace with structured error code from proxy.
-    _BLOCK_KEYWORDS = frozenset({"blocked", "guardrail"})
+    _GUARDRAIL_BLOCKED_CODE = "GUARDRAIL_BLOCKED"
 
     def __init__(
         self,
@@ -51,9 +54,11 @@ class ADKGuardrailsPlugin(FlintAIPlugin):
         llm_api_key: str | None = None,
         policy_id: str | None = None,
         content_config: Any = None,
+        require_guardrails: bool | None = None,
     ) -> None:
         self._user_content_config = content_config
         self.content_config: Any = None
+        self._require_guardrails = require_guardrails
         self._config, self._config_from_constructor = _validate_and_build_config(
             gateway_url=gateway_url,
             api_key=api_key,
@@ -81,16 +86,37 @@ class ADKGuardrailsPlugin(FlintAIPlugin):
             )
 
     def on_init(self, client: FlintAIClient) -> None:
+        if self._require_guardrails is None:
+            self._require_guardrails = client.require_guardrails
         self._config = _resolve_on_init(
-            client, self._config, self._config_from_constructor
+            client,
+            self._config,
+            self._config_from_constructor,
+            self._require_guardrails,
         )
         if self._config is not None and self.content_config is None:
             self._build_content_config(self._config)
 
     def before_model_callback(self, callback_context: Any, llm_request: Any) -> None:
-        """Injects agent identity and session ID as request headers."""
+        """Inject agent identity and session ID as request headers.
+
+        Fails closed (symmetric with the LangChain middleware's header
+        injection): if the request's header dict cannot be located — ``config``
+        or ``http_options`` is missing — identity/session headers would be
+        silently dropped, so this raises ``FlintAIGuardrailsError`` when
+        guardrails are required. Pass ``require_guardrails=False`` for
+        best-effort behavior.
+        """
+        require = effective_require_guardrails(self._require_guardrails)
         config = llm_request.config
         if config is None or getattr(config, "http_options", None) is None:
+            if require:
+                raise FlintAIGuardrailsError(
+                    "Cannot inject guardrails identity/session headers: the ADK "
+                    "llm_request has no http_options. Pass the plugin's "
+                    "content_config to the Agent (generate_content_config=...), "
+                    "or set require_guardrails=False for best-effort operation."
+                )
             logger.debug("llm request config doesn't contain http_options struct")
             return None
 
@@ -111,9 +137,7 @@ class ADKGuardrailsPlugin(FlintAIPlugin):
                 headers["X-Agent-Name"] = agent_name
 
         if "X-Agent-Id" not in headers:
-            agent_id = os.environ.get("AGENT_ID")
-            if agent_id:
-                headers["X-Agent-Id"] = agent_id
+            headers["X-Agent-Id"] = os.environ.get("AGENT_ID") or self.name
 
         try:
             session_id = callback_context.session.id
@@ -122,6 +146,19 @@ class ADKGuardrailsPlugin(FlintAIPlugin):
         else:
             headers["X-Agent-Session-Id"] = session_id
 
+        return None
+
+    @classmethod
+    def _detect_guardrail_block(cls, error: Exception) -> dict[str, Any] | None:
+        for attr in ("details", "body"):
+            data = getattr(error, attr, None)
+            if (
+                isinstance(data, dict)
+                and data.get("code") == cls._GUARDRAIL_BLOCKED_CODE
+            ):
+                return data
+        if cls._GUARDRAIL_BLOCKED_CODE in str(error):
+            return {}
         return None
 
     @classmethod
@@ -137,23 +174,27 @@ class ADKGuardrailsPlugin(FlintAIPlugin):
                 'Install with: pip install "flintai-sdk-py[adk]"'
             ) from exc
 
-        error_msg = str(error).lower()
-        status_code = getattr(error, "status_code", None) or getattr(
-            error, "code", None
-        )
-        is_block = (status_code is not None and status_code == 403) or any(
-            kw in error_msg for kw in cls._BLOCK_KEYWORDS
-        )
+        block_data = cls._detect_guardrail_block(error)
 
-        if is_block:
+        if block_data is not None:
             logger.warning("Request blocked: %s", error)
+
+            metadata = None
+            if block_data:
+                metadata = {
+                    k: block_data[k]
+                    for k in ("policy_id", "policy_name", "findings")
+                    if k in block_data
+                } or None
+
             return LlmResponse(
                 content=types.Content(
                     role="model",
                     parts=[types.Part(text="Request blocked by guardrails policy.")],
                 ),
-                error_code="GUARDRAIL_BLOCKED",
+                error_code=cls._GUARDRAIL_BLOCKED_CODE,
                 error_message=str(error),
                 turn_complete=True,
+                custom_metadata=metadata,
             )
         raise error

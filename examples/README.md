@@ -5,9 +5,8 @@
 - `python3.13 -m venv .venv`
 - `source .venv/bin/activate`
 - `pip install -r requirements.txt`
-- `bazel build //sdk/flintai-sdk-py:flintai_wheel`
-- `pip install ../../../bazel-bin/sdk/flintai-sdk-py/flintai_sdk_py-0.1.0-py3-none-any.whl`
-- Bring up the Envoy+Guardrails+ExtProc stack
+- `pip install -e ..`
+- Configure a `.env` file with `FLINTAI_GATEWAY_URL`, `FLINTAI_API_KEY`, and `FLINTAI_LLM_API_KEY` (see `../.env.example`)
 
 ## ADK
 

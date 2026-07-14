@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import atexit
+import logging
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from flintai.core import FlintAIClient
+from flintai.guardrails import FlintAIGuardrailsError
 from flintai.plugins import FlintAIPlugin
 
 try:
@@ -20,6 +22,7 @@ __all__ = [
     "shutdown",
     "register_plugin",
     "FlintAIClient",
+    "FlintAIGuardrailsError",
     "FlintAIPlugin",
     "wrap",
 ]
@@ -65,6 +68,9 @@ def _configure_guardrails_from_params(
     if not check_optional_guardrails_params(gateway_url, api_key, llm_api_key):
         return
 
+    # Guard above returns early unless both are non-None.
+    assert gateway_url is not None and api_key is not None
+
     configure_guardrails(
         gateway_url=gateway_url,
         api_key=api_key,
@@ -80,6 +86,7 @@ def init(
     api_key: str | None = None,
     llm_api_key: str | None = None,
     policy_id: str | None = None,
+    require_guardrails: bool = True,
 ) -> FlintAIClient:
     """Initialize FlintAI SDK and optionally configure guardrails.
 
@@ -90,14 +97,13 @@ def init(
 
     if provider is not None and provider not in PROVIDER_PATH_MAP:
         raise ValueError(
-            f"Unsupported provider: '{provider}'. "
-            f"Supported: {list(PROVIDER_PATH_MAP.keys())}"
+            f"Unsupported provider: '{provider}'. Supported: {list(PROVIDER_PATH_MAP.keys())}"
         )
 
     if core._client is not None:
         core._client.shutdown()
 
-    client = FlintAIClient(provider=provider)
+    client = FlintAIClient(provider=provider, require_guardrails=require_guardrails)
     core._client = client
 
     global _atexit_registered
@@ -106,6 +112,15 @@ def init(
         _atexit_registered = True
 
     _configure_guardrails_from_params(gateway_url, api_key, llm_api_key, policy_id)
+
+    if require_guardrails and client.guardrails_config is None:
+        raise FlintAIGuardrailsError(
+            "Guardrails configuration is required but no config was found. "
+            "Provide gateway_url and api_key to flintai.init(), "
+            "or set the FLINTAI_GATEWAY_URL and FLINTAI_API_KEY "
+            "environment variables. "
+            "Pass require_guardrails=False to allow operation without guardrails."
+        )
 
     return client
 
@@ -126,6 +141,8 @@ def wrap(
     api_key: str | None = None,
     llm_api_key: str | None = None,
     policy_id: str | None = None,
+    require_guardrails: bool = True,
+    forward_llm_key: bool = False,
 ) -> Any:
     """Wrap an LLM client with guardrails routing.
 
@@ -133,11 +150,25 @@ def wrap(
     LangChain chat models wrapping one of these).
     Auto-initializes FlintAI SDK if not already initialized.
     Returns the same client instance, mutated in place.
+
+    By default the upstream provider key is NOT forwarded to the gateway; the
+    gateway supplies its own upstream credentials. Set ``forward_llm_key=True``
+    to auto-extract the key from the client and forward it as ``X-LLM-API-Key``.
+    Passing ``llm_api_key=`` or setting ``FLINTAI_LLM_API_KEY`` still forwards an
+    explicit key regardless of this flag.
     """
+    from flintai import core
     from flintai.guardrails import resolve_from_env
     from flintai.plugins._llm_wrapper import wrap_client
 
+    created = core._client is None
     _ensure_client()
+    # _ensure_client() guarantees the global client is set.
+    assert core._client is not None
+    active_client = core._client
+
+    if created:
+        active_client.require_guardrails = require_guardrails
 
     gateway_url, api_key, llm_api_key, policy_id = resolve_from_env(
         gateway_url,
@@ -146,7 +177,7 @@ def wrap(
         policy_id,
     )
 
-    if llm_api_key is None and gateway_url is not None:
+    if forward_llm_key and llm_api_key is None and gateway_url is not None:
         llm_api_key = getattr(client, "api_key", None)
         if llm_api_key is None:
             for attr in ("root_client", "_client", "client"):
@@ -155,8 +186,23 @@ def wrap(
                     llm_api_key = getattr(inner, "api_key", None)
                     if llm_api_key is not None:
                         break
+        if llm_api_key is not None:
+            logging.getLogger(__name__).warning(
+                "llm_api_key auto-extracted from client object. "
+                "Set FLINTAI_LLM_API_KEY or pass llm_api_key= explicitly "
+                "to avoid implicit credential forwarding."
+            )
 
     _configure_guardrails_from_params(gateway_url, api_key, llm_api_key, policy_id)
+
+    if require_guardrails and active_client.guardrails_config is None:
+        raise FlintAIGuardrailsError(
+            "Guardrails configuration is required but no config was found. "
+            "Provide gateway_url and api_key to flintai.wrap(), "
+            "or set the FLINTAI_GATEWAY_URL and FLINTAI_API_KEY "
+            "environment variables. "
+            "Pass require_guardrails=False to allow operation without guardrails."
+        )
 
     return wrap_client(client)
 

@@ -10,3 +10,10 @@ build/
 .ruff_cache/
 .mypy_cache/
 .env
+*.db
+*.sqlite*
+
+# Release audit artifacts
+release/*.json
+release/*.csv
+release/*.txt
