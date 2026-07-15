@@ -3,6 +3,7 @@
 import warnings
 
 import pytest
+
 from flintai import core
 from flintai.core import FlintAIClient
 from flintai.guardrails import (

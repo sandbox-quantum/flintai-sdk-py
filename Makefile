@@ -14,12 +14,12 @@ test:
 	pytest
 
 lint:
-	ruff check src/ tests/
-	ruff format --check src/ tests/
+	ruff check src/ tests/ examples/
+	ruff format --check src/ tests/ examples/
 
 lint-fix:
-	ruff check --fix src/ tests/
-	ruff format src/ tests/
+	ruff check --fix src/ tests/ examples/
+	ruff format src/ tests/ examples/
 
 typecheck:
 	mypy src/

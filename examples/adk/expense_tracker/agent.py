@@ -6,10 +6,10 @@ Helps users maintain financial records through natural conversation
 import os
 import sqlite3
 from datetime import datetime
-from typing import Optional
+
+from google.adk.agents import LlmAgent
 
 from flintai.plugins.adk import ADKGuardrailsPlugin
-from google.adk.agents import LlmAgent
 
 # Database setup
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "expenses.db")
@@ -134,9 +134,9 @@ def get_current_date() -> str:
 
 
 def search_expenses(
-    category: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    category: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
     limit: int = 10,
 ) -> str:
     """

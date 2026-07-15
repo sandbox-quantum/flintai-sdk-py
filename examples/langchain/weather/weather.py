@@ -1,5 +1,6 @@
-from flintai.plugins.langchain import LangChainGuardrailsMiddleware
 from langchain.agents import create_agent
+
+from flintai.plugins.langchain import LangChainGuardrailsMiddleware
 
 middleware = LangChainGuardrailsMiddleware()
 

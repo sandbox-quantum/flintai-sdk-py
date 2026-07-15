@@ -3,8 +3,9 @@
 import sys
 from unittest.mock import MagicMock, patch
 
-import flintai
 import pytest
+
+import flintai
 from flintai.guardrails import FlintAIGuardrailsError, InsecureGatewayWarning
 from flintai.plugins.adk import ADKGuardrailsPlugin
 
