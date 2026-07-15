@@ -66,7 +66,7 @@ class LangChainGuardrailsMiddleware(FlintAIPlugin, _LangChainMiddleware):
         from langchain.agents import create_agent
 
         middleware = LangChainGuardrailsMiddleware(
-            gateway_url="https://guardrails.example.com",
+            gateway_url="https://app.flintai.dev",
             api_key="your-guardrails-api-key",
             llm_api_key="your-openai-api-key",
         )

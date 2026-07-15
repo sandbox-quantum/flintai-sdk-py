@@ -114,18 +114,18 @@ class TestExtractThreadId:
 class TestConstruction:
     def test_with_explicit_params(self):
         middleware = LangChainGuardrailsMiddleware(
-            gateway_url="https://guardrails.example.com",
+            gateway_url="https://app.flintai.dev",
             api_key="grl_sk_test",
             llm_api_key="sk-test",
         )
         assert middleware._config is not None
-        assert middleware._config.gateway_url == "https://guardrails.example.com"
+        assert middleware._config.gateway_url == "https://app.flintai.dev"
         assert middleware._config.headers["X-FlintAI-API-Key"] == "grl_sk_test"
         assert middleware._config.headers["X-LLM-API-Key"] == "sk-test"
 
     def test_with_policy_id(self):
         middleware = LangChainGuardrailsMiddleware(
-            gateway_url="https://guardrails.example.com",
+            gateway_url="https://app.flintai.dev",
             api_key="grl_sk_test",
             llm_api_key="sk-test",
             policy_id="pol-1",
@@ -161,7 +161,7 @@ class TestOnInit:
         import logging
 
         middleware = LangChainGuardrailsMiddleware(
-            gateway_url="https://guardrails.example.com",
+            gateway_url="https://app.flintai.dev",
             api_key="grl_sk_test",
             llm_api_key="sk-test",
         )
@@ -206,7 +206,7 @@ class TestOnInit:
 class TestWrapModelCallRouting:
     def test_applies_guardrails_config_on_first_call(self):
         middleware = LangChainGuardrailsMiddleware(
-            gateway_url="https://guardrails.example.com",
+            gateway_url="https://app.flintai.dev",
             api_key="grl_sk_test",
             llm_api_key="sk-test",
         )
@@ -227,7 +227,7 @@ class TestWrapModelCallRouting:
 
     def test_routing_applied_only_once(self):
         middleware = LangChainGuardrailsMiddleware(
-            gateway_url="https://guardrails.example.com",
+            gateway_url="https://app.flintai.dev",
             api_key="grl_sk_test",
             llm_api_key="sk-test",
         )
@@ -244,7 +244,7 @@ class TestWrapModelCallRouting:
 
     def test_unknown_model_skips_routing_when_not_required(self):
         middleware = LangChainGuardrailsMiddleware(
-            gateway_url="https://guardrails.example.com",
+            gateway_url="https://app.flintai.dev",
             api_key="grl_sk_test",
             llm_api_key="sk-test",
             require_guardrails=False,
@@ -264,7 +264,7 @@ class TestWrapModelCallRouting:
         # No flintai.init()/register_plugin => on_init never runs =>
         # require_guardrails stays None and must default to fail-closed.
         middleware = LangChainGuardrailsMiddleware(
-            gateway_url="https://guardrails.example.com",
+            gateway_url="https://app.flintai.dev",
             api_key="grl_sk_test",
             llm_api_key="sk-test",
         )
@@ -290,7 +290,7 @@ class TestWrapModelCallRouting:
 
     def test_unknown_model_raises_when_guardrails_required(self):
         middleware = LangChainGuardrailsMiddleware(
-            gateway_url="https://guardrails.example.com",
+            gateway_url="https://app.flintai.dev",
             api_key="grl_sk_test",
             llm_api_key="sk-test",
             require_guardrails=True,
