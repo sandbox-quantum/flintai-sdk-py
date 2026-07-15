@@ -45,7 +45,7 @@ import flintai
 client = openai.OpenAI(api_key="your-openai-api-key")
 client = flintai.wrap(
     client,
-    gateway_url="https://guardrails.example.com",
+    gateway_url="https://app.flintai.dev",
     api_key="your-guardrails-api-key",
     policy_id="your-policy-id",  # optional
 )
@@ -65,7 +65,7 @@ import flintai
 client = anthropic.Anthropic(api_key="your-anthropic-api-key")
 client = flintai.wrap(
     client,
-    gateway_url="https://guardrails.example.com",
+    gateway_url="https://app.flintai.dev",
     api_key="your-guardrails-api-key",
 )
 
@@ -87,7 +87,7 @@ import flintai
 client = google.genai.Client(api_key="your-gemini-api-key")
 client = flintai.wrap(
     client,
-    gateway_url="https://guardrails.example.com",
+    gateway_url="https://app.flintai.dev",
     api_key="your-guardrails-api-key",
     llm_api_key="your-gemini-api-key",
 )
@@ -109,7 +109,7 @@ import flintai
 llm = ChatOpenAI(model="gpt-4", api_key="your-openai-api-key")
 llm = flintai.wrap(
     llm,
-    gateway_url="https://guardrails.example.com",
+    gateway_url="https://app.flintai.dev",
     api_key="your-guardrails-api-key",
 )
 
@@ -127,7 +127,7 @@ from flintai.plugins.adk import ADKGuardrailsPlugin
 from google.adk import Agent
 
 plugin = ADKGuardrailsPlugin(
-    gateway_url="https://guardrails.example.com",
+    gateway_url="https://app.flintai.dev",
     api_key="your-guardrails-api-key",
     llm_api_key="your-gemini-api-key",
 )
@@ -173,7 +173,7 @@ Set the variables in your shell or in a `.env` file (requires `pip install "flin
 
 ```bash
 # .env
-FLINTAI_GATEWAY_URL=https://guardrails.example.com
+FLINTAI_GATEWAY_URL=https://app.flintai.dev
 FLINTAI_API_KEY=your-guardrails-api-key
 FLINTAI_LLM_API_KEY=your-llm-api-key
 ```

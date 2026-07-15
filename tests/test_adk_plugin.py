@@ -68,7 +68,7 @@ def mock_adk_modules():
 def test_adk_plugin_creates_content_config(mock_genai_modules):
     flintai.init(
         provider="google",
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
@@ -77,8 +77,7 @@ def test_adk_plugin_creates_content_config(mock_genai_modules):
 
     assert plugin.content_config is not None
     assert (
-        plugin.content_config.http_options.base_url
-        == "https://guardrails.example.com/gemini/"
+        plugin.content_config.http_options.base_url == "https://app.flintai.dev/gemini/"
     )
     assert (
         plugin.content_config.http_options.headers["X-FlintAI-API-Key"] == "grl_sk_test"
@@ -88,14 +87,13 @@ def test_adk_plugin_creates_content_config(mock_genai_modules):
 
 def test_adk_plugin_simplified_flow(mock_genai_modules):
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
     assert plugin.content_config is not None
     assert (
-        plugin.content_config.http_options.base_url
-        == "https://guardrails.example.com/gemini/"
+        plugin.content_config.http_options.base_url == "https://app.flintai.dev/gemini/"
     )
     assert (
         plugin.content_config.http_options.headers["X-FlintAI-API-Key"] == "grl_sk_test"
@@ -108,15 +106,14 @@ def test_adk_plugin_merges_user_content_config(mock_genai_modules):
     user_config.top_p = 0.9
 
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
         content_config=user_config,
     )
     assert plugin.content_config is user_config
     assert (
-        plugin.content_config.http_options.base_url
-        == "https://guardrails.example.com/gemini/"
+        plugin.content_config.http_options.base_url == "https://app.flintai.dev/gemini/"
     )
     assert (
         plugin.content_config.http_options.headers["X-FlintAI-API-Key"] == "grl_sk_test"
@@ -127,7 +124,7 @@ def test_adk_plugin_merges_user_content_config(mock_genai_modules):
 
 def test_adk_plugin_simplified_with_policy_id(mock_genai_modules):
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
         policy_id="pol-1",
@@ -141,7 +138,7 @@ def test_adk_plugin_on_init_with_constructor_config(mock_genai_modules, caplog):
     import logging
 
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
@@ -331,7 +328,7 @@ def test_on_model_error_non_blocked_reraises(mock_adk_modules):
 
 def test_before_model_callback_injects_agent_name_and_session_id(mock_genai_modules):
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
@@ -352,7 +349,7 @@ def test_before_model_callback_injects_agent_name_and_session_id(mock_genai_modu
 
 def test_before_model_callback_no_agent_name(mock_genai_modules):
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
@@ -372,7 +369,7 @@ def test_before_model_callback_no_agent_name(mock_genai_modules):
 
 def test_before_model_callback_static_agent_name_takes_precedence(mock_genai_modules):
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
@@ -392,7 +389,7 @@ def test_before_model_callback_static_agent_name_takes_precedence(mock_genai_mod
 
 def test_before_model_callback_no_session(mock_genai_modules):
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
@@ -410,7 +407,7 @@ def test_before_model_callback_no_session(mock_genai_modules):
 
 def test_before_model_callback_config_none_raises_when_required(mock_genai_modules):
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
@@ -425,7 +422,7 @@ def test_before_model_callback_config_none_raises_when_required(mock_genai_modul
 
 def test_before_model_callback_config_none_best_effort(mock_genai_modules):
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
         require_guardrails=False,
@@ -442,7 +439,7 @@ def test_before_model_callback_http_options_none_raises_when_required(
     mock_genai_modules,
 ):
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
@@ -457,7 +454,7 @@ def test_before_model_callback_http_options_none_raises_when_required(
 
 def test_before_model_callback_http_options_none_best_effort(mock_genai_modules):
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
         require_guardrails=False,
@@ -472,7 +469,7 @@ def test_before_model_callback_http_options_none_best_effort(mock_genai_modules)
 
 def test_before_model_callback_headers_none(mock_genai_modules):
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
@@ -495,7 +492,7 @@ def test_before_model_callback_agent_name_env_var_takes_priority(
 ):
     monkeypatch.setenv("AGENT_NAME", "env-agent-name")
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
@@ -515,7 +512,7 @@ def test_before_model_callback_agent_id_env_var_in_header_when_provided(
 ):
     monkeypatch.setenv("AGENT_ID", "custom-agent-id")
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
@@ -538,7 +535,7 @@ def test_before_model_callback_agent_id_defaults_to_plugin_name(
     # agent identity is never silently dropped (symmetric with LangChain).
     monkeypatch.delenv("AGENT_ID", raising=False)
     plugin = ADKGuardrailsPlugin(
-        gateway_url="https://guardrails.example.com",
+        gateway_url="https://app.flintai.dev",
         api_key="grl_sk_test",
         llm_api_key="AIzaSy_test",
     )
