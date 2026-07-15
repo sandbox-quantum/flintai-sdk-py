@@ -1,10 +1,14 @@
 """Tests for error paths in flintai.guardrails."""
 
+import warnings
+
 import pytest
 from flintai import core
 from flintai.core import FlintAIClient
 from flintai.guardrails import (
     GuardrailsConfig,
+    InsecureGatewayWarning,
+    _validate_guardrails_params,
     build_guardrails_config,
     configure_guardrails,
     detect_provider,
@@ -241,6 +245,28 @@ def test_build_guardrails_config_does_not_touch_global_state(monkeypatch):
     assert core._client.guardrails_config is None
 
 
+def test_build_guardrails_config_without_llm_api_key():
+    config = build_guardrails_config(
+        gateway_url="https://gw.example.com",
+        api_key="key",
+        provider="openai",
+    )
+    assert config.headers["X-FlintAI-API-Key"] == "key"
+    assert "X-LLM-API-Key" not in config.headers
+    assert config.provider == "openai"
+
+
+def test_check_optional_params_without_llm_api_key():
+    from flintai.guardrails import check_optional_guardrails_params
+
+    result = check_optional_guardrails_params(
+        gateway_url="https://gw.example.com",
+        api_key="key",
+        llm_api_key=None,
+    )
+    assert result is True
+
+
 @pytest.mark.parametrize(
     "kwargs,error_match",
     [
@@ -261,7 +287,7 @@ def test_build_guardrails_config_does_not_touch_global_state(monkeypatch):
                 llm_api_key="llm_key",
                 provider="openai",
             ),
-            "gateway_url must start with http",
+            "gateway_url must use https://",
             id="bad-url",
         ),
     ],
@@ -284,18 +310,13 @@ def test_detect_provider_multiple_keys_raises(monkeypatch):
     [
         pytest.param(
             dict(gateway_url="bad", api_key="key", llm_api_key="llm"),
-            "gateway_url must start with http",
+            "gateway_url must use https://",
             id="bad-url",
         ),
         pytest.param(
             dict(gateway_url="https://gw.example.com", api_key="", llm_api_key="llm"),
             "api_key must be a non-empty string",
             id="empty-api-key",
-        ),
-        pytest.param(
-            dict(gateway_url="https://gw.example.com", api_key="key", llm_api_key=""),
-            "llm_api_key must be a non-empty string",
-            id="empty-llm-api-key",
         ),
     ],
 )
@@ -380,3 +401,200 @@ def test_resolve_from_env_loads_dotenv(monkeypatch, tmp_path):
     guardrails._dotenv_loaded = False
     gw, api, llm, pol = resolve_from_env()
     assert api == "from-dotenv"
+
+
+def test_resolve_from_env_ignores_parent_dotenv(monkeypatch, tmp_path):
+    """Parent directory .env must NOT be loaded — only cwd."""
+    pytest.importorskip("dotenv", reason="python-dotenv not installed")
+    parent = tmp_path / "parent"
+    child = parent / "child"
+    child.mkdir(parents=True)
+    (parent / ".env").write_text("FLINTAI_API_KEY=from-parent\n")
+    monkeypatch.chdir(child)
+    from flintai import guardrails
+
+    guardrails._dotenv_loaded = False
+    _, api, _, _ = resolve_from_env()
+    assert api is None
+
+
+# --- gateway host allowlist ---
+
+
+def test_validate_rejects_empty_hostname():
+    with pytest.raises(ValueError, match="valid hostname"):
+        build_guardrails_config(
+            gateway_url="https:///path",
+            api_key="key",
+            llm_api_key="llm",
+        )
+
+
+def test_validate_allowlist_accepts_matching_host(monkeypatch):
+    monkeypatch.setenv("FLINTAI_ALLOWED_GATEWAY_HOSTS", "gw.example.com")
+    config = build_guardrails_config(
+        gateway_url="https://gw.example.com",
+        api_key="key",
+        llm_api_key="llm",
+    )
+    assert config.gateway_url == "https://gw.example.com"
+
+
+def test_validate_allowlist_rejects_non_matching_host(monkeypatch):
+    monkeypatch.setenv("FLINTAI_ALLOWED_GATEWAY_HOSTS", "gw.example.com")
+    with pytest.raises(ValueError, match="not in the allowed gateway hosts"):
+        build_guardrails_config(
+            gateway_url="https://evil.example.com",
+            api_key="key",
+            llm_api_key="llm",
+        )
+
+
+def test_validate_allowlist_comma_separated(monkeypatch):
+    monkeypatch.setenv(
+        "FLINTAI_ALLOWED_GATEWAY_HOSTS", "gw1.example.com, gw2.example.com"
+    )
+    config = build_guardrails_config(
+        gateway_url="https://gw2.example.com",
+        api_key="key",
+        llm_api_key="llm",
+    )
+    assert config.gateway_url == "https://gw2.example.com"
+
+
+def test_validate_allowlist_case_insensitive(monkeypatch):
+    monkeypatch.setenv("FLINTAI_ALLOWED_GATEWAY_HOSTS", "GW.Example.COM")
+    config = build_guardrails_config(
+        gateway_url="https://gw.example.com",
+        api_key="key",
+        llm_api_key="llm",
+    )
+    assert config.gateway_url == "https://gw.example.com"
+
+
+def test_validate_wildcard_accepts_any(monkeypatch):
+    monkeypatch.setenv("FLINTAI_ALLOWED_GATEWAY_HOSTS", "*")
+    config = build_guardrails_config(
+        gateway_url="https://any-host.example.com",
+        api_key="key",
+        llm_api_key="llm",
+    )
+    assert config.gateway_url == "https://any-host.example.com"
+
+
+def test_validate_default_allowlist_rejects_non_default(monkeypatch):
+    """With no env allowlist, only the shipped default host is accepted."""
+    monkeypatch.delenv("FLINTAI_ALLOWED_GATEWAY_HOSTS", raising=False)
+    with pytest.raises(ValueError, match="not in the allowed gateway hosts"):
+        build_guardrails_config(
+            gateway_url="https://evil.example.com",
+            api_key="key",
+            llm_api_key="llm",
+        )
+
+
+def test_validate_default_allowlist_accepts_app_flintai_dev(monkeypatch):
+    monkeypatch.delenv("FLINTAI_ALLOWED_GATEWAY_HOSTS", raising=False)
+    config = build_guardrails_config(
+        gateway_url="https://app.flintai.dev",
+        api_key="key",
+        llm_api_key="llm",
+    )
+    assert config.gateway_url == "https://app.flintai.dev"
+
+
+def test_validate_loopback_exempt_from_allowlist(monkeypatch):
+    """Loopback is always allowed, even against a restrictive allowlist."""
+    monkeypatch.setenv("FLINTAI_ALLOWED_GATEWAY_HOSTS", "app.flintai.dev")
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("always")
+        config = build_guardrails_config(
+            gateway_url="http://localhost:8080",
+            api_key="key",
+            llm_api_key="llm",
+        )
+    assert config.gateway_url == "http://localhost:8080"
+
+
+# --- plaintext HTTP rejection ---
+
+
+def test_validate_rejects_http_non_loopback():
+    with pytest.raises(ValueError, match="must use https://"):
+        _validate_guardrails_params("http://gw.example.com", "key")
+
+
+def test_validate_http_loopback_accepted():
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        result = _validate_guardrails_params("http://localhost:8080", "key")
+    assert result == "http://localhost:8080"
+    assert len(w) == 1
+    assert issubclass(w[0].category, InsecureGatewayWarning)
+    assert "plaintext HTTP" in str(w[0].message)
+
+
+def test_validate_http_127_0_0_1_accepted():
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        result = _validate_guardrails_params("http://127.0.0.1:8080", "key")
+    assert result == "http://127.0.0.1:8080"
+    assert len(w) == 1
+    assert issubclass(w[0].category, InsecureGatewayWarning)
+
+
+def test_validate_http_ipv6_loopback_accepted():
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        result = _validate_guardrails_params("http://[::1]:8080", "key")
+    assert result == "http://[::1]:8080"
+    assert len(w) == 1
+    assert issubclass(w[0].category, InsecureGatewayWarning)
+
+
+def test_validate_https_always_accepted():
+    result = _validate_guardrails_params("https://gw.example.com", "key")
+    assert result == "https://gw.example.com"
+
+
+def test_validate_rejects_bad_scheme():
+    with pytest.raises(ValueError, match="must use https://"):
+        _validate_guardrails_params("ftp://gw.example.com", "key")
+
+
+def test_validate_rejects_empty_url():
+    with pytest.raises(ValueError, match="must use https://"):
+        _validate_guardrails_params("", "key")
+
+
+def test_build_config_rejects_http_non_loopback():
+    with pytest.raises(ValueError, match="must use https://"):
+        build_guardrails_config(
+            gateway_url="http://gw.example.com",
+            api_key="key",
+            llm_api_key="llm_key",
+        )
+
+
+def test_build_config_http_loopback_accepted():
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("always")
+        config = build_guardrails_config(
+            gateway_url="http://localhost:8080",
+            api_key="key",
+            llm_api_key="llm_key",
+        )
+    assert config.gateway_url == "http://localhost:8080"
+
+
+def test_configure_rejects_http_non_loopback(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setattr(core, "_client", FlintAIClient(provider=None))
+    with pytest.raises(ValueError, match="must use https://"):
+        configure_guardrails(
+            gateway_url="http://gw.example.com",
+            api_key="key",
+            llm_api_key="llm_key",
+        )

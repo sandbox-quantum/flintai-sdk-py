@@ -5,15 +5,17 @@ from __future__ import annotations
 import os
 import warnings
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 try:
-    from dotenv import find_dotenv, load_dotenv
+    from dotenv import load_dotenv
 except ImportError:
-    find_dotenv = None  # type: ignore[assignment]
     load_dotenv = None  # type: ignore[assignment]
 
 __all__ = [
+    "FlintAIGuardrailsError",
     "GuardrailsConfig",
+    "InsecureGatewayWarning",
     "PROVIDER_PATH_MAP",
     "build_guardrails_config",
     "check_optional_guardrails_params",
@@ -22,7 +24,17 @@ __all__ = [
     "resolve_from_env",
 ]
 
+
+class FlintAIGuardrailsError(RuntimeError):
+    """Raised when guardrails enforcement is required but cannot be applied."""
+
+
 _dotenv_loaded = False
+
+
+class InsecureGatewayWarning(UserWarning):
+    """Emitted when gateway_url uses plaintext HTTP."""
+
 
 PROVIDER_PATH_MAP = {
     "openai": "/openai",
@@ -33,6 +45,18 @@ PROVIDER_PATH_MAP = {
 
 @dataclass
 class GuardrailsConfig:
+    """Resolved routing configuration for the FlintAI guardrails proxy.
+
+    Attributes:
+        base_url: Provider-specific proxy URL that SDK traffic is routed to.
+        headers: Auth/routing headers injected into outbound requests
+            (e.g. ``X-FlintAI-API-Key``). Masked in ``repr`` to avoid leaking
+            secrets.
+        provider: Provider this config targets, or None if provider-agnostic.
+        gateway_url: Base gateway URL before the provider path prefix.
+        policy_id: Optional guardrails policy identifier.
+    """
+
     base_url: str
     headers: dict[str, str]
     provider: str | None
@@ -40,6 +64,7 @@ class GuardrailsConfig:
     policy_id: str | None = None
 
     def clear(self) -> None:
+        """Zero out all fields so a released config cannot route traffic."""
         self.headers.clear()
         self.base_url = ""
         self.gateway_url = ""
@@ -73,18 +98,59 @@ def detect_provider() -> str | None:
     return found[0] if found else None
 
 
+_ALLOWED_HOSTS_ENV = "FLINTAI_ALLOWED_GATEWAY_HOSTS"
+
+# Applied when FLINTAI_ALLOWED_GATEWAY_HOSTS is unset, so an arbitrary gateway_url
+# cannot silently receive provider/guardrails keys. Override via the env var
+# (comma-separated hosts, or "*" to allow any host). Loopback is always allowed.
+_DEFAULT_ALLOWED_GATEWAY_HOSTS: frozenset[str] = frozenset({"app.flintai.dev"})
+
+
 def _validate_guardrails_params(
-    gateway_url: str, api_key: str, llm_api_key: str
+    gateway_url: str,
+    api_key: str,
 ) -> str:
     """Validate raw guardrails params. Returns normalized gateway_url."""
-    if not gateway_url or not gateway_url.startswith(("http://", "https://")):
+    parsed = urlparse(gateway_url or "")
+    is_loopback = parsed.hostname in ("localhost", "127.0.0.1", "::1")
+    if parsed.scheme == "https":
+        pass
+    elif parsed.scheme == "http" and is_loopback:
+        warnings.warn(
+            f"gateway_url {gateway_url!r} uses plaintext HTTP; "
+            "API keys will be sent unencrypted.",
+            InsecureGatewayWarning,
+            stacklevel=3,
+        )
+    else:
         raise ValueError(
-            f"gateway_url must start with http:// or https://, got: {gateway_url!r}"
+            "gateway_url must use https:// (http:// is allowed "
+            f"only for localhost); got: {gateway_url!r}"
+        )
+    parsed = urlparse(gateway_url)
+    if not parsed.hostname:
+        raise ValueError(
+            f"gateway_url must contain a valid hostname, got: {gateway_url!r}"
+        )
+    allowed_raw = os.getenv(_ALLOWED_HOSTS_ENV)
+    if allowed_raw is not None:
+        allowed = {h.strip().lower() for h in allowed_raw.split(",") if h.strip()}
+    else:
+        allowed = {h.lower() for h in _DEFAULT_ALLOWED_GATEWAY_HOSTS}
+    # Loopback is always permitted (local dev); "*" is an explicit opt-out that
+    # allows any host (e.g. a self-hosted gateway).
+    if (
+        not is_loopback
+        and "*" not in allowed
+        and parsed.hostname.lower() not in allowed
+    ):
+        raise ValueError(
+            f"gateway_url hostname {parsed.hostname!r} is not in the allowed "
+            f"gateway hosts {sorted(allowed)}. Set {_ALLOWED_HOSTS_ENV} to "
+            f"override (comma-separated hosts, or '*' to allow any host)."
         )
     if not api_key:
         raise ValueError("api_key must be a non-empty string")
-    if not llm_api_key:
-        raise ValueError("llm_api_key must be a non-empty string")
     return gateway_url.rstrip("/")
 
 
@@ -95,7 +161,8 @@ def check_optional_guardrails_params(
 ) -> bool:
     """Return True if guardrails params are provided, False if all are None.
 
-    Raises ValueError if only some params are provided.
+    Raises ValueError if gateway_url or api_key is provided without the other.
+    llm_api_key is independently optional.
     """
     if gateway_url is None and api_key is None and llm_api_key is None:
         return False
@@ -104,14 +171,12 @@ def check_optional_guardrails_params(
         for name, val in [
             ("gateway_url", gateway_url),
             ("api_key", api_key),
-            ("llm_api_key", llm_api_key),
         ]
         if val is None
     ]
     if missing:
         raise ValueError(
-            "gateway_url, api_key, and llm_api_key are all required "
-            "when providing guardrails config."
+            "gateway_url and api_key are both required when providing guardrails config."
         )
     return True
 
@@ -136,7 +201,7 @@ def resolve_from_env(
     """
     global _dotenv_loaded
     if load_dotenv is not None and not _dotenv_loaded:
-        load_dotenv(find_dotenv(usecwd=True))
+        load_dotenv(os.path.join(os.getcwd(), ".env"))
         _dotenv_loaded = True
     if gateway_url is None:
         gateway_url = os.getenv(_ENV_VARS["gateway_url"]) or None
@@ -152,12 +217,12 @@ def resolve_from_env(
 def build_guardrails_config(
     gateway_url: str,
     api_key: str,
-    llm_api_key: str,
+    llm_api_key: str | None = None,
     provider: str | None = None,
     policy_id: str | None = None,
 ) -> GuardrailsConfig:
     """Build a GuardrailsConfig without touching global state."""
-    gateway_url = _validate_guardrails_params(gateway_url, api_key, llm_api_key)
+    gateway_url = _validate_guardrails_params(gateway_url, api_key)
 
     if provider is not None:
         path_prefix = PROVIDER_PATH_MAP.get(provider)
@@ -170,10 +235,11 @@ def build_guardrails_config(
     else:
         base_url = gateway_url
 
-    headers = {
+    headers: dict[str, str] = {
         "X-FlintAI-API-Key": api_key,
-        "X-LLM-API-Key": llm_api_key,
     }
+    if llm_api_key is not None:
+        headers["X-LLM-API-Key"] = llm_api_key
 
     if policy_id is not None:
         headers["X-Guardrails-Policy-Id"] = policy_id
@@ -190,7 +256,7 @@ def build_guardrails_config(
 def configure_guardrails(
     gateway_url: str,
     api_key: str,
-    llm_api_key: str,
+    llm_api_key: str | None = None,
     provider: str | None = None,
     policy_id: str | None = None,
 ) -> GuardrailsConfig:

@@ -1,3 +1,3 @@
 env/
-.adk/
-adk/expense_tracker/expenses.db
+*.db
+*.sqlite*

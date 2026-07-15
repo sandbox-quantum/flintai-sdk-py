@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import flintai
 import pytest
+from flintai.guardrails import FlintAIGuardrailsError, InsecureGatewayWarning
 from flintai.plugins.langchain import LangChainGuardrailsMiddleware, _extract_thread_id
 
 # ---------------------------------------------------------------------------
@@ -132,7 +133,7 @@ class TestConstruction:
 
     def test_partial_params_raises(self):
         with pytest.raises(
-            ValueError, match="gateway_url, api_key, and llm_api_key are all required"
+            ValueError, match="gateway_url and api_key are both required"
         ):
             LangChainGuardrailsMiddleware(gateway_url="https://gw.example.com")
 
@@ -163,15 +164,35 @@ class TestOnInit:
             api_key="grl_sk_test",
             llm_api_key="sk-test",
         )
-        client = flintai.init()
+        client = flintai.init(require_guardrails=False)
         with caplog.at_level(logging.INFO):
             flintai.register_plugin(middleware)
         assert client.guardrails_config is middleware._config
         assert "will route through" in caplog.text
 
     def test_no_config_warns(self, caplog):
-        flintai.init()
+        flintai.init(require_guardrails=False)
         middleware = LangChainGuardrailsMiddleware()
+        flintai.register_plugin(middleware)
+        assert "No guardrails config found" in caplog.text
+
+    def test_no_config_raises_when_required(self):
+        flintai.init(require_guardrails=False)
+        middleware = LangChainGuardrailsMiddleware(require_guardrails=True)
+        with pytest.raises(FlintAIGuardrailsError, match="No guardrails config found"):
+            flintai.register_plugin(middleware)
+
+    def test_inherits_require_guardrails_from_client(self):
+        client = flintai.init(require_guardrails=False)
+        client.require_guardrails = True
+        middleware = LangChainGuardrailsMiddleware()
+        with pytest.raises(FlintAIGuardrailsError, match="No guardrails config found"):
+            flintai.register_plugin(middleware)
+
+    def test_explicit_override_honored_over_client(self, caplog):
+        client = flintai.init(require_guardrails=False)
+        client.require_guardrails = True
+        middleware = LangChainGuardrailsMiddleware(require_guardrails=False)
         flintai.register_plugin(middleware)
         assert "No guardrails config found" in caplog.text
 
@@ -198,7 +219,7 @@ class TestWrapModelCallRouting:
             result = middleware.wrap_model_call(request, handler)
 
         mock_apply.assert_called_once_with(
-            model.root_client, "openai", middleware._config
+            model.root_client, "openai", middleware._config, True
         )
         handler.assert_called_once_with(request)
         assert result == "response"
@@ -220,7 +241,27 @@ class TestWrapModelCallRouting:
 
         mock_apply.assert_called_once()
 
-    def test_unknown_model_skips_routing(self):
+    def test_unknown_model_skips_routing_when_not_required(self):
+        middleware = LangChainGuardrailsMiddleware(
+            gateway_url="https://guardrails.example.com",
+            api_key="grl_sk_test",
+            llm_api_key="sk-test",
+            require_guardrails=False,
+        )
+        model = MagicMock()
+        type(model).__module__ = "unknown_module"
+        request = _make_request(model)
+        handler = MagicMock(return_value="ok")
+
+        result = middleware.wrap_model_call(request, handler)
+
+        assert result == "ok"
+        assert middleware._routed is False
+        assert middleware._sdk_client is None
+
+    def test_unknown_model_fails_closed_by_default_standalone(self):
+        # No flintai.init()/register_plugin => on_init never runs =>
+        # require_guardrails stays None and must default to fail-closed.
         middleware = LangChainGuardrailsMiddleware(
             gateway_url="https://guardrails.example.com",
             api_key="grl_sk_test",
@@ -231,11 +272,35 @@ class TestWrapModelCallRouting:
         request = _make_request(model)
         handler = MagicMock(return_value="ok")
 
-        result = middleware.wrap_model_call(request, handler)
+        with pytest.raises(FlintAIGuardrailsError, match="Cannot extract SDK client"):
+            middleware.wrap_model_call(request, handler)
 
-        assert result == "ok"
-        assert middleware._routed is True
-        assert middleware._sdk_client is None
+    def test_known_model_no_config_raises_when_guardrails_required(self):
+        middleware = LangChainGuardrailsMiddleware(require_guardrails=True)
+        model = _make_openai_model()
+        request = _make_request(model)
+        handler = MagicMock(return_value="ok")
+
+        with pytest.raises(
+            FlintAIGuardrailsError,
+            match="Guardrails configuration is required",
+        ):
+            middleware.wrap_model_call(request, handler)
+
+    def test_unknown_model_raises_when_guardrails_required(self):
+        middleware = LangChainGuardrailsMiddleware(
+            gateway_url="https://guardrails.example.com",
+            api_key="grl_sk_test",
+            llm_api_key="sk-test",
+            require_guardrails=True,
+        )
+        model = MagicMock()
+        type(model).__module__ = "unknown_module"
+        request = _make_request(model)
+        handler = MagicMock(return_value="ok")
+
+        with pytest.raises(FlintAIGuardrailsError, match="Cannot extract SDK client"):
+            middleware.wrap_model_call(request, handler)
 
 
 # ---------------------------------------------------------------------------
@@ -380,3 +445,32 @@ class TestAgentId:
             middleware.wrap_model_call(request, handler)
 
         assert model.root_client._custom_headers["X-Agent-Id"] == "langchain-guardrails"
+
+
+# ---------------------------------------------------------------------------
+# plaintext HTTP rejection
+# ---------------------------------------------------------------------------
+
+
+class TestHTTPRejection:
+    def test_rejects_http_non_loopback(self):
+        with pytest.raises(ValueError, match="must use https://"):
+            LangChainGuardrailsMiddleware(
+                gateway_url="http://gw.example.com",
+                api_key="key",
+                llm_api_key="llm_key",
+            )
+
+    def test_http_loopback_accepted(self):
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            middleware = LangChainGuardrailsMiddleware(
+                gateway_url="http://localhost:8080",
+                api_key="key",
+                llm_api_key="llm_key",
+            )
+        assert middleware._config is not None
+        assert middleware._config.gateway_url == "http://localhost:8080"
+        assert any(issubclass(x.category, InsecureGatewayWarning) for x in w)
