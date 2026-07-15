@@ -390,8 +390,7 @@ def _apply_openai_config(
         client._base_url = base_url
     else:
         raise TypeError(
-            f"Cannot set base_url on {type(client).__name__}: "
-            f"no known attribute found"
+            f"Cannot set base_url on {type(client).__name__}: no known attribute found"
         )
     _merge_sdk_headers(client, "openai", headers, require_guardrails)
 

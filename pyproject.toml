@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "flintai-sdk-py"
-version = "0.3.0"
+version = "1.0.0"
 description = "Lightweight SDK for routing AI agent LLM traffic through the FlintAI guardrails proxy"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
   {name = "SandboxAQ"},
 ]
@@ -16,7 +17,6 @@ keywords = ["ai", "agents", "guardrails"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -59,7 +59,8 @@ warn_unused_configs = true
 
 [tool.ruff]
 target-version = "py310"
-line-length = 120
+line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]

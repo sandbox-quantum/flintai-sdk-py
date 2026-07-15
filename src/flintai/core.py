@@ -44,10 +44,7 @@ class FlintAIClient:
         self.guardrails_config: GuardrailsConfig | None = None
 
     def __repr__(self) -> str:
-        return (
-            f"FlintAIClient(provider={self.provider!r}, "
-            f"plugins={len(self.plugins)})"
-        )
+        return f"FlintAIClient(provider={self.provider!r}, plugins={len(self.plugins)})"
 
     def register_plugin(self, plugin: FlintAIPlugin) -> None:
         """Register a plugin and invoke its ``on_init`` hook with this client."""

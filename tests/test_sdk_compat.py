@@ -8,6 +8,7 @@ provider SDK is not installed (run ``pip install flintai-sdk-py[all]`` to enable
 from __future__ import annotations
 
 import pytest
+
 from flintai.plugins._llm_wrapper import _get_sdk_headers
 
 # --- OpenAI ---

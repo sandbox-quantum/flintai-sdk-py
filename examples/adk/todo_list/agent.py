@@ -1,11 +1,12 @@
 import asyncio
 import logging
 
-from flintai.plugins.adk import ADKGuardrailsPlugin
 from google import adk
 from google.adk.agents import LlmAgent
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
+
+from flintai.plugins.adk import ADKGuardrailsPlugin
 
 # Set up logging to catch ADK internal events
 logging.basicConfig(
