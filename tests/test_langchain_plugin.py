@@ -325,7 +325,6 @@ class TestWrapModelCallHeaders:
 
         headers = model.root_client._custom_headers
         assert headers["X-Agent-Session-Id"] == "sess-abc-123"
-        assert headers["X-Agent-Id"] == "langchain-guardrails"
 
     def test_injects_session_id_from_config(self):
         middleware = LangChainGuardrailsMiddleware(
@@ -432,7 +431,7 @@ class TestAgentId:
 
         assert model.root_client._custom_headers["X-Agent-Id"] == "my-custom-agent"
 
-    def test_agent_id_defaults_to_plugin_name(self):
+    def test_no_agent_id_header_without_env_var(self):
         middleware = LangChainGuardrailsMiddleware(
             gateway_url="https://gw.example.com",
             api_key="key",
@@ -445,7 +444,7 @@ class TestAgentId:
         with patch("flintai.plugins._llm_wrapper._apply_guardrails_config"):
             middleware.wrap_model_call(request, handler)
 
-        assert model.root_client._custom_headers["X-Agent-Id"] == "langchain-guardrails"
+        assert "X-Agent-Id" not in model.root_client._custom_headers
 
 
 # ---------------------------------------------------------------------------

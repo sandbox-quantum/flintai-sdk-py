@@ -38,8 +38,6 @@ jobs:
     permissions:
       contents: read
       actions: read
-      # Required for PyPI Trusted Publishing (OIDC). No API token needed.
-      id-token: write
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
@@ -48,3 +46,5 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}

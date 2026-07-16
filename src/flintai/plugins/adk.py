@@ -137,7 +137,9 @@ class ADKGuardrailsPlugin(FlintAIPlugin):
                 headers["X-Agent-Name"] = agent_name
 
         if "X-Agent-Id" not in headers:
-            headers["X-Agent-Id"] = os.environ.get("AGENT_ID") or self.name
+            agent_id = os.environ.get("AGENT_ID")
+            if agent_id:
+                headers["X-Agent-Id"] = agent_id
 
         try:
             session_id = callback_context.session.id

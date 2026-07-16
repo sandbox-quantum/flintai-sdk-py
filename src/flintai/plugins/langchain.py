@@ -203,5 +203,6 @@ class LangChainGuardrailsMiddleware(FlintAIPlugin, _LangChainMiddleware):
             headers["X-Agent-Session-Id"] = thread_id
 
         if "X-Agent-Id" not in headers:
-            agent_id = os.environ.get("AGENT_ID") or self.name
-            headers["X-Agent-Id"] = agent_id
+            agent_id = os.environ.get("AGENT_ID")
+            if agent_id:
+                headers["X-Agent-Id"] = agent_id

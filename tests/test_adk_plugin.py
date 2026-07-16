@@ -528,11 +528,9 @@ def test_before_model_callback_agent_id_env_var_in_header_when_provided(
     assert llm_request.config.http_options.headers["X-Agent-Name"] == "search_agent"
 
 
-def test_before_model_callback_agent_id_defaults_to_plugin_name(
+def test_before_model_callback_no_agent_id_header_without_env_var(
     mock_genai_modules, monkeypatch
 ):
-    # With no AGENT_ID env var, X-Agent-Id falls back to the plugin name so
-    # agent identity is never silently dropped (symmetric with LangChain).
     monkeypatch.delenv("AGENT_ID", raising=False)
     plugin = ADKGuardrailsPlugin(
         gateway_url="https://app.flintai.dev",
@@ -547,7 +545,7 @@ def test_before_model_callback_agent_id_defaults_to_plugin_name(
 
     plugin.before_model_callback(ctx, llm_request)
 
-    assert llm_request.config.http_options.headers["X-Agent-Id"] == "adk-guardrails"
+    assert "X-Agent-Id" not in llm_request.config.http_options.headers
     assert llm_request.config.http_options.headers["X-Agent-Name"] == "search_agent"
 
 
