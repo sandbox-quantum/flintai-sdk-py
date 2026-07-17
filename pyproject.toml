@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flintai-sdk-py"
-version = "1.0.1"
+version = "1.0.2"
 description = "Lightweight SDK for routing AI agent LLM traffic through the FlintAI guardrails proxy"
 readme = "README.md"
 requires-python = ">=3.10"
