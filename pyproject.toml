@@ -32,7 +32,7 @@ Repository = "https://github.com/sandbox-quantum/flintai-sdk-py"
 "Bug Tracker" = "https://github.com/sandbox-quantum/flintai-sdk-py/issues"
 
 [project.optional-dependencies]
-openai = ["openai>=2.40.0,<3"]
+openai = ["openai>=2.40.0,<4"]
 anthropic = ["anthropic>=0.105.2,<1"]
 genai = ["google-genai>=2.7,<3"]
 langchain = [
