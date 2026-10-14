@@ -1,4 +1,7 @@
-.PHONY: install install-dev test lint typecheck build clean publish release-audit license-check sbom vuln-scan secret-scan lock-deps check-metadata
+SHELL := /bin/bash
+.SHELLFLAGS := -eu -o pipefail -c
+
+.PHONY: install install-dev test lint typecheck build clean release-audit license-check sbom vuln-scan secret-scan lock-deps check-metadata
 
 # ---------------------------------------------------------------------------
 # Development
@@ -30,10 +33,6 @@ build: clean
 clean:
 	rm -rf dist/ build/ *.egg-info src/*.egg-info
 
-publish: release-audit build
-	twine check dist/*
-	twine upload dist/*
-
 # ---------------------------------------------------------------------------
 # Metadata consistency (README ranges must match pyproject.toml pins)
 # ---------------------------------------------------------------------------
@@ -42,8 +41,8 @@ check-metadata:
 	@echo "=== Metadata consistency check ==="
 	@errors=0; \
 	for dep in openai anthropic google-genai; do \
-		pyproject_range=$$(grep "\"$${dep}>=" pyproject.toml | sed "s/.*\"\($${dep}[^\"]*\)\".*/\1/" | head -1); \
-		readme_range=$$(grep "\`$${dep}>=" README.md | sed "s/.*\`\($${dep}[^\`]*\)\`.*/\1/" | head -1); \
+		pyproject_range=$$(grep "\"$${dep}>=" pyproject.toml | sed "s/.*\"\($${dep}[^\"]*\)\".*/\1/" | head -1 || true); \
+		readme_range=$$(grep "\`$${dep}>=" README.md | sed "s/.*\`\($${dep}[^\`]*\)\`.*/\1/" | head -1 || true); \
 		if [ -z "$$pyproject_range" ] || [ -z "$$readme_range" ]; then \
 			echo "SKIP: $${dep} (not found in both files)"; \
 		elif [ "$$pyproject_range" != "$$readme_range" ]; then \
@@ -76,9 +75,9 @@ release-audit: check-metadata lock-deps license-check sbom vuln-scan secret-scan
 
 # Packages whose license field carries full license text rather than a short
 # SPDX identifier (so --allow-only can't match them). Manually verified permissive:
-#   tiktoken       — MIT License
-#   flintai-sdk-py — Apache-2.0 (this project)
-IGNORE_PACKAGES := --ignore-packages flintai-sdk-py tiktoken
+#   tiktoken            — MIT License
+#   switch-trust-sdk-py — Apache-2.0 (this project)
+IGNORE_PACKAGES := --ignore-packages switch-trust-sdk-py tiktoken
 
 license-check:
 	@mkdir -p release
@@ -122,9 +121,11 @@ MIT;\
 MIT-0;\
 MIT OR Apache-2.0;\
 MIT-CMU;\
+0BSD;\
 ISC License (ISCL);\
 ISC;\
 Mozilla Public License 2.0 (MPL 2.0);\
+MPL-2.0;\
 MPL-2.0 AND (Apache-2.0 OR MIT);\
 MPL-2.0 AND MIT;\
 Python Software Foundation License;\
@@ -136,8 +137,7 @@ Historical Permission Notice and Disclaimer (HPND);\
 GNU Lesser General Public License v2 or later (LGPLv2+);\
 GNU Lesser General Public License v3 or later (LGPLv3+);\
 Zope Public License;\
-ZPL-2.1;\
-UNKNOWN" \
+ZPL-2.1" \
 		2>&1 || (echo "WARNING: Some packages have licenses that need manual review — see above" && exit 1)
 	@echo ""
 	@echo "Packages with UNKNOWN license (need manual verification):"
@@ -154,23 +154,40 @@ sbom:
 		--pyproject pyproject.toml
 	@echo "SBOM written to release/sbom.json"
 
-vuln-scan:
+vuln-scan: lock-deps
 	@mkdir -p release
-	@echo "=== Dependency vulnerability scan ==="
-	pip-audit --format=json --output=release/vulnerabilities.json || true
-	pip-audit --desc 2>&1 | tee release/vulnerabilities.txt
-	@echo ""
+	@echo "=== Dependency vulnerability scan (runtime dependencies) ==="
+	@ignore_args=(); today=$$(date -u +%F); \
+	if [ -f .pip-audit-ignore ]; then \
+		while read -r id expiry reason || [ -n "$$id" ]; do \
+			[ -n "$$id" ] || continue; \
+			if ! [[ "$$expiry" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$$ ]] || [ -z "$$reason" ]; then \
+				echo "FAIL: .pip-audit-ignore entry '$$id' must be '<vuln-id> <YYYY-MM-DD expiry> <reason>'"; exit 1; \
+			fi; \
+			if [[ "$$expiry" < "$$today" ]]; then \
+				echo "FAIL: .pip-audit-ignore entry '$$id' expired on $$expiry"; exit 1; \
+			fi; \
+			echo "Ignoring $$id until $$expiry: $$reason"; \
+			ignore_args+=(--ignore-vuln "$$id"); \
+		done < .pip-audit-ignore; \
+	fi; \
+	audit=(pip-audit -r release/requirements-runtime.txt --no-deps --disable-pip $${ignore_args[@]+"$${ignore_args[@]}"}); \
+	rc=0; \
+	"$${audit[@]}" --format=json --output=release/vulnerabilities.json || rc=$$?; \
+	"$${audit[@]}" --desc 2>&1 | tee release/vulnerabilities.txt || rc=$$?; \
+	if [ "$$rc" -ne 0 ]; then echo "FAIL: pip-audit reported vulnerabilities (exit $$rc) - see release/vulnerabilities.txt"; fi; \
+	exit $$rc
 
 secret-scan:
 	@mkdir -p release
 	@echo "=== Secret scan (gitleaks) ==="
-	gitleaks detect --source . --no-git \
+	gitleaks detect --source . --no-git --config .gitleaks.toml --redact \
 		--report-path=release/gitleaks-report.json \
 		--report-format=json \
 		--exit-code 1 \
 		|| (echo "FAIL: secrets detected — see release/gitleaks-report.json" && exit 1)
 	@echo "=== Secret scan (gitleaks) - git history ==="
-	gitleaks detect --source . \
+	gitleaks detect --source . --config .gitleaks.toml --redact \
 		--report-path=release/gitleaks-history-report.json \
 		--report-format=json \
 		--exit-code 1 \
@@ -178,6 +195,10 @@ secret-scan:
 	@echo "No secrets detected."
 
 lock-deps:
+	@mkdir -p release
 	@echo "=== Locking dependencies ==="
 	pip-compile --all-extras --strip-extras --output-file=requirements.lock pyproject.toml
 	@echo "Locked dependencies written to requirements.lock"
+	@extras=$$(python -c "import tomllib; d = tomllib.load(open('pyproject.toml', 'rb'))['project']['optional-dependencies']; print(' '.join('--extra ' + k for k in d if k not in ('dev', 'audit', 'all')))"); \
+	pip-compile $$extras --strip-extras --output-file=release/requirements-runtime.txt pyproject.toml
+	@echo "Runtime dependencies (what users install) written to release/requirements-runtime.txt"

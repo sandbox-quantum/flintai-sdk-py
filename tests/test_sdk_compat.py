@@ -2,14 +2,14 @@
 
 These tests import real provider SDK clients and verify that ``_get_sdk_headers``
 can locate their internal headers dict.  They are skipped automatically when the
-provider SDK is not installed (run ``pip install flintai-sdk-py[all]`` to enable).
+provider SDK is not installed (run ``pip install switch-trust-sdk-py[all]`` to enable).
 """
 
 from __future__ import annotations
 
 import pytest
 
-from flintai.plugins._llm_wrapper import _get_sdk_headers
+from switch_trust.plugins._llm_wrapper import _get_sdk_headers
 
 # --- OpenAI ---
 

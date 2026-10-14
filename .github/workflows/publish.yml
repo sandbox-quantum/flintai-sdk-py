@@ -7,18 +7,98 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
 jobs:
-  build:
-    name: Build distribution
+  verify:
+    name: Verify release tag
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify signed release tag
+        run: |
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}" "+refs/heads/main:refs/remotes/origin/main"
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse "${TAG}^{commit}")" ]; then
+            echo "::error::checked-out commit $(git rev-parse HEAD) is not the commit $TAG points at"
+            exit 1
+          fi
+          if [ "$(git cat-file -t "$TAG")" != "tag" ]; then
+            echo "::error::$TAG is a lightweight tag; release tags must be annotated and signed (git tag -s)"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${TAG}^{commit}" origin/main; then
+            echo "::error::$TAG does not point at a commit on main"
+            exit 1
+          fi
+          signers="$RUNNER_TEMP/release-signers"
+          git show origin/main:.github/release-signers > "$signers"
+          if ! git -c gpg.ssh.allowedSignersFile="$signers" verify-tag "$TAG"; then
+            echo "::error::$TAG is not signed by an authorized release signer"
+            exit 1
+          fi
+          tagger_email="$(git for-each-ref --format='%(taggeremail:trim)' "refs/tags/${TAG}")"
+          case "$tagger_email" in
+            *@users.noreply.github.com) ;;
+            *)
+              echo "::error::$TAG tagger email is not a GitHub noreply address; delete the tag and re-tag with a users.noreply.github.com user.email (RELEASE.md)"
+              exit 1
+              ;;
+          esac
+      - name: Tag must match the package version and have a CHANGELOG entry
+        run: |
+          version="$(python3 -I -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")"
+          if [ "$TAG" != "v${version}" ]; then
+            echo "::error::tag $TAG does not match pyproject.toml version v${version}"
+            exit 1
+          fi
+          if ! grep -Fq "### ${version} - " CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '### ${version} - YYYY-MM-DD' entry; add one to the SDK source before releasing"
+            exit 1
+          fi
+
+  release-audit:
+    name: Release audit
+    needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/release-audit
+      - name: Upload audit reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: release-audit
+          path: |
+            release/
+            requirements.lock
+          if-no-files-found: ${{ job.status == 'success' && 'error' || 'warn' }}
+
+  build:
+    name: Build distribution
+    needs: [verify, release-audit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
       - name: Install build tooling
-        run: pip install build "twine>=6.1" "packaging>=24.2"
+        run: python -m pip install --require-hashes -r requirements-release.txt
       - name: Build sdist and wheel
+        env:
+          PIP_CONSTRAINT: build-constraints.txt
         run: python -m build
       - name: Check distribution metadata
         run: twine check dist/*
@@ -27,17 +107,18 @@ jobs:
         with:
           name: dist
           path: dist/
+          if-no-files-found: error
 
   publish:
     name: Publish to PyPI
-    needs: build
+    needs: [verify, build]
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/flintai-sdk-py/
+      url: https://pypi.org/project/switch-trust-sdk-py/
     permissions:
       contents: read
-      actions: read
+      id-token: write
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
@@ -46,5 +127,24 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+
+  attach-reports:
+    name: Attach audit reports to release
+    needs: [verify, build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download audit reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          name: release-audit
+          path: audit/
+      - name: Upload reports to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          shopt -s nullglob
+          files=(audit/release/* audit/requirements.lock)
+          gh release upload "$TAG" "${files[@]}" --clobber -R "$GITHUB_REPOSITORY"

@@ -1,24 +1,24 @@
-"""Unit tests for flintai.core.FlintAIClient."""
+"""Unit tests for switch_trust.core.SwitchTrustClient."""
 
 from unittest.mock import MagicMock
 
-from flintai.core import FlintAIClient
+from switch_trust.core import SwitchTrustClient
 
 
 def test_construction_defaults():
-    client = FlintAIClient()
+    client = SwitchTrustClient()
     assert client.plugins == []
     assert client.provider is None
     assert client.guardrails_config is None
 
 
 def test_construction_with_provider():
-    client = FlintAIClient(provider="openai")
+    client = SwitchTrustClient(provider="openai")
     assert client.provider == "openai"
 
 
 def test_register_plugin():
-    client = FlintAIClient()
+    client = SwitchTrustClient()
     plugin_a = MagicMock()
     plugin_b = MagicMock()
 
@@ -32,7 +32,7 @@ def test_register_plugin():
 
 
 def test_notify_behavior():
-    client = FlintAIClient()
+    client = SwitchTrustClient()
     plugin_a = MagicMock()
     plugin_b = MagicMock(spec=[])
     client.plugins = [plugin_a, plugin_b]
@@ -43,9 +43,9 @@ def test_notify_behavior():
 
 
 def test_shutdown_full_behavior():
-    from flintai.guardrails import GuardrailsConfig
+    from switch_trust.guardrails import GuardrailsConfig
 
-    client = FlintAIClient()
+    client = SwitchTrustClient()
     plugin = MagicMock()
     client.plugins = [plugin]
     client.guardrails_config = GuardrailsConfig(
@@ -62,11 +62,11 @@ def test_shutdown_full_behavior():
     assert client.guardrails_config is None
 
 
-def test_flintai_client_repr():
-    from flintai.plugins import FlintAIPlugin
+def test_switch_trust_client_repr():
+    from switch_trust.plugins import SwitchTrustPlugin
 
-    client = FlintAIClient(provider="openai")
-    plugin = MagicMock(spec=FlintAIPlugin)
+    client = SwitchTrustClient(provider="openai")
+    plugin = MagicMock(spec=SwitchTrustPlugin)
     plugin.name = "mock"
     client.plugins = [plugin]
 
@@ -76,13 +76,13 @@ def test_flintai_client_repr():
 
 
 def test_bare_plugin_noop_methods():
-    from flintai.plugins import FlintAIPlugin
+    from switch_trust.plugins import SwitchTrustPlugin
 
-    plugin = FlintAIPlugin()
+    plugin = SwitchTrustPlugin()
     plugin.on_init(MagicMock())
     plugin.on_shutdown()
 
-    client = FlintAIClient()
+    client = SwitchTrustClient()
     client.register_plugin(plugin)
     client.shutdown()
 
@@ -90,19 +90,19 @@ def test_bare_plugin_noop_methods():
 def test_notify_exception_is_caught(caplog):
     import logging
 
-    from flintai.plugins import FlintAIPlugin
+    from switch_trust.plugins import SwitchTrustPlugin
 
-    class FailingPlugin(FlintAIPlugin):
+    class FailingPlugin(SwitchTrustPlugin):
         name = "failing"
 
         def on_shutdown(self):
             raise ValueError("plugin error")
 
-    client = FlintAIClient()
+    client = SwitchTrustClient()
     plugin_ok = MagicMock()
     client.plugins = [FailingPlugin(), plugin_ok]
 
-    with caplog.at_level(logging.WARNING, logger="flintai.core"):
+    with caplog.at_level(logging.WARNING, logger="switch_trust.core"):
         client.notify("on_shutdown")
 
     plugin_ok.on_shutdown.assert_called_once()

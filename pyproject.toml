@@ -3,9 +3,9 @@ requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "flintai-sdk-py"
-version = "1.0.2"
-description = "Lightweight SDK for routing AI agent LLM traffic through the FlintAI guardrails proxy"
+name = "switch-trust-sdk-py"
+version = "1.1.0"
+description = "Lightweight SDK for routing AI agent LLM traffic through the Switch Trust guardrails proxy"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -28,23 +28,25 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Repository = "https://github.com/sandbox-quantum/flintai-sdk-py"
-"Bug Tracker" = "https://github.com/sandbox-quantum/flintai-sdk-py/issues"
+Repository = "https://github.com/sandbox-quantum/switch-trust-sdk-py"
+"Bug Tracker" = "https://github.com/sandbox-quantum/switch-trust-sdk-py/issues"
+Changelog = "https://github.com/sandbox-quantum/switch-trust-sdk-py/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 openai = ["openai>=2.40.0,<3"]
 anthropic = ["anthropic>=0.105.2,<1"]
 genai = ["google-genai>=2.7,<3"]
 langchain = [
+    "langchain>=1.3,<2",
     "langchain-openai>=1.2,<2",
     "langchain-anthropic>=1.4,<2",
     "langchain-google-genai>=4.2,<5",
 ]
-adk = ["google-adk>=2.1,<3", "google-genai>=2.7,<3"]
+adk = ["google-adk>=2.1,<2.6", "google-genai>=2.7,<3"]
 dotenv = ["python-dotenv>=1.2.2,<2"]
 dev = ["pytest>=9.0.3", "ruff>=0.15.15", "mypy>=2.1.0"]
 audit = ["build>=1.0", "twine>=6.0", "pip-licenses>=5.0", "cyclonedx-bom>=6.0", "pip-audit>=2.7", "pip-tools>=7.4"]
-all = ["flintai-sdk-py[openai,anthropic,genai,langchain,adk,dotenv,dev,audit]"]
+all = ["switch-trust-sdk-py[openai,anthropic,genai,langchain,adk,dotenv,dev,audit]"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

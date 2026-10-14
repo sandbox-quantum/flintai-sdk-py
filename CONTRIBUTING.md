@@ -1,4 +1,4 @@
-# Contributing to FlintAI SDK (Python)
+# Contributing to Switch Trust SDK (Python)
 
 Thank you for your interest in contributing!
 

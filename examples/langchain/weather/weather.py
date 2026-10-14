@@ -1,8 +1,9 @@
 from langchain.agents import create_agent
+from langchain_openai import ChatOpenAI
 
-from flintai.plugins.langchain import LangChainGuardrailsMiddleware
+from switch_trust.plugins.langchain import LangChainGuardrailsMiddleware
 
-middleware = LangChainGuardrailsMiddleware()
+middleware = LangChainGuardrailsMiddleware(load_dotenv=True)
 
 
 def get_weather(city: str) -> str:
@@ -10,8 +11,9 @@ def get_weather(city: str) -> str:
     return f"It's always sunny in {city}!"
 
 
+llm = ChatOpenAI(model="gpt-4o")
 agent = create_agent(
-    model="openai:gpt-4o",
+    model=llm,
     tools=[get_weather],
     system_prompt="You are a helpful assistant",
     middleware=[middleware],
