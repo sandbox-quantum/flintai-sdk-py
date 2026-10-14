@@ -1,12 +1,19 @@
 import asyncio
 import logging
+import os
 
+from dotenv import load_dotenv
 from google import adk
 from google.adk.agents import LlmAgent
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
-from flintai.plugins.adk import ADKGuardrailsPlugin
+from switch_trust.plugins.adk import ADKGuardrailsPlugin
+
+# Load .env ourselves before reading SWITCH_TRUST_ALLOW_INSECURE_GATEWAY below —
+# ADKGuardrailsPlugin(load_dotenv=True) only loads it internally once the
+# constructor runs, which is too late for an os.getenv() in this same statement.
+load_dotenv()
 
 # Set up logging to catch ADK internal events
 logging.basicConfig(
@@ -36,11 +43,18 @@ def notify_user(message: str):
     return {"status": "success"}
 
 
-plugin = ADKGuardrailsPlugin()
+# allow_insecure_gateway is read here (not inside the SDK) so a loopback
+# gateway_url in .env can never silently opt in on its own — it requires this
+# explicit, programmatic flag.
+plugin = ADKGuardrailsPlugin(
+    load_dotenv=True,
+    allow_insecure_gateway=os.getenv("SWITCH_TRUST_ALLOW_INSECURE_GATEWAY", "").lower()
+    == "true",
+)
 
 
 root_agent = LlmAgent(
-    model="gemini-3-flash-preview",
+    model="gemini-3.5-flash",
     name="todo_list_agent",
     description="generate todo list items for the user",
     instruction="""

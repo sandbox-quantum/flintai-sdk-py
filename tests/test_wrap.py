@@ -1,4 +1,4 @@
-"""Tests for flintai.wrap() — wrapping user-created LLM clients."""
+"""Tests for switch_trust.wrap() — wrapping user-created LLM clients."""
 
 import logging
 import sys
@@ -6,11 +6,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import flintai
-from flintai import core
-from flintai.core import FlintAIClient
-from flintai.guardrails import FlintAIGuardrailsError, GuardrailsConfig
-from flintai.plugins._llm_wrapper import (
+import switch_trust
+from switch_trust import core
+from switch_trust.core import SwitchTrustClient
+from switch_trust.guardrails import GuardrailsConfig, SwitchTrustGuardrailsError
+from switch_trust.plugins._llm_wrapper import (
     _apply_guardrails_config,
     _check_sdk_version,
     _clear_wrapped,
@@ -111,7 +111,15 @@ def test_apply_guardrails_anthropic():
 
     _apply_guardrails_config(client, "anthropic", config)
 
-    assert client._base_url == "https://gw.example.com/anthropic"
+    assert client._base_url == "https://gw.example.com/anthropic/"
+    # A missing trailing slash makes httpx.URL.join() replace the last path
+    # segment instead of appending after it, silently dropping the provider
+    # prefix -- assert on the actual joined request URL, not just the stored
+    # string, so that regression can't hide behind a string that "looks" right.
+    assert (
+        str(client._base_url.join("v1/messages"))
+        == "https://gw.example.com/anthropic/v1/messages"
+    )
     assert client._custom_headers["X-FlintAI-API-Key"] == "grl_key"
     assert client._custom_headers["X-LLM-API-Key"] == "sk-test"
 
@@ -160,13 +168,17 @@ def test_wrap_applies_guardrails_when_configured(monkeypatch):
     client = _make_mock_client("anthropic._client", "Anthropic", "anthropic")
     client._base_url = "https://api.anthropic.com"
 
-    sc = FlintAIClient(provider="anthropic")
+    sc = SwitchTrustClient(provider="anthropic")
     sc.guardrails_config = _guardrails_config("anthropic")
     monkeypatch.setattr(core, "_client", sc)
 
     wrap_client(client)
 
-    assert client._base_url == "https://gw.example.com/anthropic"
+    assert client._base_url == "https://gw.example.com/anthropic/"
+    assert (
+        str(client._base_url.join("v1/messages"))
+        == "https://gw.example.com/anthropic/v1/messages"
+    )
     assert client._custom_headers["X-FlintAI-API-Key"] == "grl_key"
 
 
@@ -174,9 +186,9 @@ def test_wrap_client_raises_when_guardrails_required_but_no_config(monkeypatch):
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
 
-    monkeypatch.setattr(core, "_client", FlintAIClient(provider="openai"))
+    monkeypatch.setattr(core, "_client", SwitchTrustClient(provider="openai"))
 
-    with pytest.raises(FlintAIGuardrailsError, match="no config was found"):
+    with pytest.raises(SwitchTrustGuardrailsError, match="no config was found"):
         wrap_client(client)
 
 
@@ -185,7 +197,7 @@ def test_wrap_skips_guardrails_when_not_configured(monkeypatch):
     client._base_url = "https://api.openai.com"
 
     monkeypatch.setattr(
-        core, "_client", FlintAIClient(provider="openai", require_guardrails=False)
+        core, "_client", SwitchTrustClient(provider="openai", require_guardrails=False)
     )
 
     wrap_client(client)
@@ -198,7 +210,7 @@ def test_wrap_double_wrap_noop(monkeypatch, caplog):
     client = _make_mock_client("openai._client", "OpenAI", "openai")
 
     monkeypatch.setattr(
-        core, "_client", FlintAIClient(provider="openai", require_guardrails=False)
+        core, "_client", SwitchTrustClient(provider="openai", require_guardrails=False)
     )
 
     wrap_client(client)
@@ -206,52 +218,52 @@ def test_wrap_double_wrap_noop(monkeypatch, caplog):
     assert "already wrapped" in caplog.text
 
 
-# --- flintai.wrap() public API ---
+# --- switch_trust.wrap() public API ---
 
 
 def test_wrap_raises_when_no_config():
-    flintai.shutdown()
+    switch_trust.shutdown()
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     with pytest.raises(
-        FlintAIGuardrailsError, match="Guardrails configuration is required"
+        SwitchTrustGuardrailsError, match="Guardrails configuration is required"
     ):
-        flintai.wrap(client)
+        switch_trust.wrap(client)
 
 
 def test_wrap_does_not_mutate_existing_client_require_guardrails(monkeypatch):
-    flintai.shutdown()
-    flintai.init(require_guardrails=False, provider="openai")
+    switch_trust.shutdown()
+    switch_trust.init(require_guardrails=False, provider="openai")
     assert core._client.require_guardrails is False
 
     client = _make_mock_client("openai._client", "OpenAI", "openai")
-    with pytest.raises(FlintAIGuardrailsError):
-        flintai.wrap(client, require_guardrails=True)
+    with pytest.raises(SwitchTrustGuardrailsError):
+        switch_trust.wrap(client, require_guardrails=True)
 
     assert core._client.require_guardrails is False
 
 
 def test_wrap_auto_inits_when_no_client():
-    flintai.shutdown()
+    switch_trust.shutdown()
     assert core._client is None
     client = _make_mock_client("openai._client", "OpenAI", "openai")
-    flintai.wrap(client, require_guardrails=False)
+    switch_trust.wrap(client, require_guardrails=False)
     assert core._client is not None
 
 
 def test_wrap_auto_init_registers_atexit(monkeypatch):
-    flintai.shutdown()
-    monkeypatch.setattr(flintai, "_atexit_registered", False)
+    switch_trust.shutdown()
+    monkeypatch.setattr(switch_trust, "_atexit_registered", False)
     client = _make_mock_client("openai._client", "OpenAI", "openai")
-    flintai.wrap(client, require_guardrails=False)
+    switch_trust.wrap(client, require_guardrails=False)
     assert core._client is not None
-    assert flintai._atexit_registered is True
+    assert switch_trust._atexit_registered is True
 
 
 def test_wrap_with_guardrails_params():
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
     client.api_key = "sk-test"
-    flintai.wrap(
+    switch_trust.wrap(
         client,
         gateway_url="https://gw.example.com",
         api_key="grl_key",
@@ -266,7 +278,7 @@ def test_wrap_auto_extracts_llm_api_key():
     client = _make_mock_client("anthropic._client", "Anthropic", "anthropic")
     client._base_url = "https://api.anthropic.com"
     client.api_key = "sk-ant-key"
-    flintai.wrap(
+    switch_trust.wrap(
         client,
         gateway_url="https://gw.example.com",
         api_key="grl_key",
@@ -279,8 +291,8 @@ def test_wrap_auto_extract_logs_warning(caplog):
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
     client.api_key = "sk-test"
-    with caplog.at_level(logging.WARNING, logger="flintai"):
-        flintai.wrap(
+    with caplog.at_level(logging.WARNING, logger="switch_trust"):
+        switch_trust.wrap(
             client,
             gateway_url="https://gw.example.com",
             api_key="grl_key",
@@ -293,8 +305,8 @@ def test_wrap_explicit_llm_key_no_warning(caplog):
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
     client.api_key = "sk-test"
-    with caplog.at_level(logging.WARNING, logger="flintai"):
-        flintai.wrap(
+    with caplog.at_level(logging.WARNING, logger="switch_trust"):
+        switch_trust.wrap(
             client,
             gateway_url="https://gw.example.com",
             api_key="grl_key",
@@ -308,7 +320,7 @@ def test_wrap_does_not_forward_client_key_by_default():
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
     client.api_key = "sk-should-not-leak"
-    flintai.wrap(client, gateway_url="https://gw.example.com", api_key="grl_key")
+    switch_trust.wrap(client, gateway_url="https://gw.example.com", api_key="grl_key")
     assert "X-LLM-API-Key" not in client._custom_headers
 
 
@@ -316,7 +328,7 @@ def test_wrap_explicit_llm_api_key_wins():
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
     client.api_key = "sk-from-client"
-    flintai.wrap(
+    switch_trust.wrap(
         client,
         gateway_url="https://gw.example.com",
         api_key="grl_key",
@@ -330,34 +342,34 @@ def test_wrap_no_api_key_on_client_succeeds_without_llm_key():
     and X-LLM-API-Key is not forwarded — the proxy uses its own upstream credentials."""
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
-    flintai.wrap(client, gateway_url="https://gw.example.com", api_key="grl_key")
+    switch_trust.wrap(client, gateway_url="https://gw.example.com", api_key="grl_key")
     assert client._custom_headers["X-FlintAI-API-Key"] == "grl_key"
     assert "X-LLM-API-Key" not in client._custom_headers
 
 
 def test_wrap_with_guardrails_params_auto_inits():
-    flintai.shutdown()
+    switch_trust.shutdown()
     assert core._client is None
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
     client.api_key = "sk-test"
-    flintai.wrap(client, gateway_url="https://gw.example.com", api_key="grl_key")
+    switch_trust.wrap(client, gateway_url="https://gw.example.com", api_key="grl_key")
     assert core._client is not None
     assert client._base_url == "https://gw.example.com/openai"
 
 
 def test_wrap_partial_guardrails_params_raises():
     with pytest.raises(ValueError, match="gateway_url and api_key are both required"):
-        flintai.wrap(
+        switch_trust.wrap(
             _make_mock_client("openai._client", "OpenAI", "openai"),
             gateway_url="https://gw.example.com",
         )
 
 
 def test_wrap_unknown_client_raises():
-    flintai.init(require_guardrails=False)
+    switch_trust.init(require_guardrails=False)
     with pytest.raises(TypeError, match="Unrecognized client type"):
-        flintai.wrap({"not": "a client"}, require_guardrails=False)
+        switch_trust.wrap({"not": "a client"}, require_guardrails=False)
 
 
 def test_wrap_preserves_user_api_key(monkeypatch):
@@ -365,11 +377,11 @@ def test_wrap_preserves_user_api_key(monkeypatch):
     client.api_key = "sk-real-key"
     client._base_url = "https://api.anthropic.com"
 
-    sc = FlintAIClient(provider="anthropic")
+    sc = SwitchTrustClient(provider="anthropic")
     sc.guardrails_config = _guardrails_config("anthropic")
     monkeypatch.setattr(core, "_client", sc)
 
-    flintai.wrap(client)
+    switch_trust.wrap(client)
 
     assert client.api_key == "sk-real-key"
 
@@ -380,7 +392,7 @@ def test_wrap_preserves_user_api_key(monkeypatch):
 def test_wrap_google_applies_guardrails(monkeypatch):
     client = _make_mock_client("google.genai.client", "Client", "google")
 
-    sc = FlintAIClient(provider="google")
+    sc = SwitchTrustClient(provider="google")
     sc.guardrails_config = _guardrails_config("google")
     monkeypatch.setattr(core, "_client", sc)
 
@@ -423,7 +435,7 @@ def _get_effective_url(client, provider):
             "anthropic._client",
             "Anthropic",
             "anthropic",
-            "https://gw.example.com/anthropic",
+            "https://gw.example.com/anthropic/",
             id="anthropic",
         ),
         pytest.param(
@@ -442,7 +454,7 @@ def test_wrap_with_deferred_provider_resolves_url(
     if provider != "google":
         client._base_url = f"https://api.{provider}.com"
 
-    sc = FlintAIClient(provider=None)
+    sc = SwitchTrustClient(provider=None)
     sc.guardrails_config = _guardrails_config_deferred()
     monkeypatch.setattr(core, "_client", sc)
 
@@ -462,7 +474,7 @@ def test_apply_guardrails_anthropic_without_httpx(monkeypatch):
     monkeypatch.setitem(sys.modules, "httpx", None)
     _apply_guardrails_config(client, "anthropic", config)
 
-    assert client._base_url == "https://gw.example.com/anthropic"
+    assert client._base_url == "https://gw.example.com/anthropic/"
     assert isinstance(client._base_url, str)
 
 
@@ -643,15 +655,16 @@ def test_wrap_langchain_applies_guardrails(
         langchain_module, class_name, inner_attr, inner_provider
     )
 
-    sc = FlintAIClient(provider=inner_provider)
+    sc = SwitchTrustClient(provider=inner_provider)
     sc.guardrails_config = _guardrails_config(inner_provider)
     monkeypatch.setattr(core, "_client", sc)
 
     wrap_client(model)
 
     expected_url = f"https://gw.example.com/{inner_provider}"
-    if inner_provider == "google":
+    if inner_provider in ("google", "anthropic"):
         expected_url += "/"
+    if inner_provider == "google":
         assert inner_client._api_client._http_options.base_url == expected_url
         assert (
             inner_client._api_client._http_options.headers["X-FlintAI-API-Key"]
@@ -667,7 +680,7 @@ def test_wrap_langchain_double_wrap_noop(monkeypatch, caplog):
         "langchain_openai.chat_models", "ChatOpenAI", "root_client", "openai"
     )
     monkeypatch.setattr(
-        core, "_client", FlintAIClient(provider="openai", require_guardrails=False)
+        core, "_client", SwitchTrustClient(provider="openai", require_guardrails=False)
     )
 
     wrap_client(model)
@@ -685,7 +698,7 @@ def test_wrap_langchain_auto_extracts_api_key():
     inner_client._base_url = "https://api.openai.com"
     inner_client.api_key = "sk-from-langchain"
 
-    flintai.wrap(
+    switch_trust.wrap(
         model,
         gateway_url="https://gw.example.com",
         api_key="grl_key",
@@ -704,7 +717,7 @@ def test_wrap_langchain_with_policy_id():
     inner_client._base_url = "https://api.openai.com"
     inner_client.api_key = "sk-test"
 
-    flintai.wrap(
+    switch_trust.wrap(
         model,
         gateway_url="https://gw.example.com",
         api_key="grl_key",
@@ -725,15 +738,15 @@ def test_detect_adk_agent_raises():
 
 def test_shutdown_clears_wrapped_tracking(monkeypatch):
     client = _make_mock_client("openai._client", "OpenAI", "openai")
-    sc = FlintAIClient(provider="openai", require_guardrails=False)
+    sc = SwitchTrustClient(provider="openai", require_guardrails=False)
     monkeypatch.setattr(core, "_client", sc)
     wrap_client(client)
     assert _is_wrapped(client)
 
-    flintai.shutdown()
+    switch_trust.shutdown()
 
     monkeypatch.setattr(
-        core, "_client", FlintAIClient(provider="openai", require_guardrails=False)
+        core, "_client", SwitchTrustClient(provider="openai", require_guardrails=False)
     )
     assert not _is_wrapped(client)
 
@@ -742,7 +755,7 @@ def test_shutdown_scrubs_anthropic_client(monkeypatch):
     client = _make_mock_client("anthropic._client", "Anthropic", "anthropic")
     client._base_url = "https://api.anthropic.com"
 
-    sc = FlintAIClient(provider="anthropic")
+    sc = SwitchTrustClient(provider="anthropic")
     sc.guardrails_config = _guardrails_config("anthropic")
     monkeypatch.setattr(core, "_client", sc)
 
@@ -750,7 +763,7 @@ def test_shutdown_scrubs_anthropic_client(monkeypatch):
     assert client._custom_headers["X-FlintAI-API-Key"] == "grl_key"
     assert client._custom_headers["X-LLM-API-Key"] == "sk-test"
 
-    flintai.shutdown()
+    switch_trust.shutdown()
 
     assert "X-FlintAI-API-Key" not in client._custom_headers
     assert "X-LLM-API-Key" not in client._custom_headers
@@ -761,14 +774,14 @@ def test_shutdown_scrubs_openai_client(monkeypatch):
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
 
-    sc = FlintAIClient(provider="openai")
+    sc = SwitchTrustClient(provider="openai")
     sc.guardrails_config = _guardrails_config("openai")
     monkeypatch.setattr(core, "_client", sc)
 
     wrap_client(client)
     assert client._custom_headers["X-FlintAI-API-Key"] == "grl_key"
 
-    flintai.shutdown()
+    switch_trust.shutdown()
 
     assert "X-FlintAI-API-Key" not in client._custom_headers
     assert "X-LLM-API-Key" not in client._custom_headers
@@ -779,14 +792,14 @@ def test_shutdown_scrubs_google_client(monkeypatch):
     client = _make_mock_client("google.genai.client", "Client", "google")
     orig_url = client._api_client._http_options.base_url
 
-    sc = FlintAIClient(provider="google")
+    sc = SwitchTrustClient(provider="google")
     sc.guardrails_config = _guardrails_config("google")
     monkeypatch.setattr(core, "_client", sc)
 
     wrap_client(client)
     assert client._api_client._http_options.headers["X-FlintAI-API-Key"] == "grl_key"
 
-    flintai.shutdown()
+    switch_trust.shutdown()
 
     assert "X-FlintAI-API-Key" not in client._api_client._http_options.headers
     assert "X-LLM-API-Key" not in client._api_client._http_options.headers
@@ -799,18 +812,137 @@ def test_shutdown_scrubs_langchain_inner_client(monkeypatch):
     )
     inner_client._base_url = "https://api.anthropic.com"
 
-    sc = FlintAIClient(provider="anthropic")
+    sc = SwitchTrustClient(provider="anthropic")
     sc.guardrails_config = _guardrails_config("anthropic")
     monkeypatch.setattr(core, "_client", sc)
 
     wrap_client(model)
     assert inner_client._custom_headers["X-FlintAI-API-Key"] == "grl_key"
 
-    flintai.shutdown()
+    switch_trust.shutdown()
 
     assert "X-FlintAI-API-Key" not in inner_client._custom_headers
     assert "X-LLM-API-Key" not in inner_client._custom_headers
     assert inner_client._base_url == "https://api.anthropic.com"
+
+
+# --- Restoration failure handling (fault injection) ---
+
+
+def _make_faulty_openai_client():
+    """OpenAI client whose base_url setter can be flipped to raise during restore."""
+
+    class FaultyOpenAI:
+        __module__ = "openai._client"
+        __name__ = "OpenAI"
+
+        def __init__(self):
+            self._internal_url = "https://api.openai.com"
+            self._custom_headers = {}
+            self._fault = False
+
+        @property
+        def base_url(self):
+            return self._internal_url
+
+        @base_url.setter
+        def base_url(self, val):
+            if self._fault:
+                raise RuntimeError(
+                    "restore blew up referencing "
+                    "https://gw.example.com/openai and grl_key"
+                )
+            self._internal_url = val
+
+    return FaultyOpenAI()
+
+
+def test_shutdown_restore_failure_logs_error_without_secrets(monkeypatch, caplog):
+    client = _make_faulty_openai_client()
+    sc = SwitchTrustClient(provider="openai")
+    sc.guardrails_config = _guardrails_config("openai")
+    monkeypatch.setattr(core, "_client", sc)
+
+    wrap_client(client)
+    assert _is_wrapped(client)
+
+    client._fault = True
+    with caplog.at_level(logging.ERROR, logger="switch_trust"):
+        _clear_wrapped()
+
+    assert "failed to restore" in caplog.text
+    assert "openai" in caplog.text
+    assert "OpenAI" in caplog.text
+    # No secrets in the log.
+    assert "gw.example.com" not in caplog.text
+    assert "grl_key" not in caplog.text
+    assert "api.openai.com" not in caplog.text
+    assert "blew up" not in caplog.text
+
+    client._fault = False
+
+
+def test_shutdown_restore_failure_preserves_state_for_retry(monkeypatch, caplog):
+    client = _make_faulty_openai_client()
+    sc = SwitchTrustClient(provider="openai")
+    sc.guardrails_config = _guardrails_config("openai")
+    monkeypatch.setattr(core, "_client", sc)
+
+    wrap_client(client)
+    client._fault = True
+    with caplog.at_level(logging.ERROR, logger="switch_trust"):
+        _clear_wrapped()
+
+    # Restore raised before headers were scrubbed: still gateway-routed, still
+    # tracked for retry.
+    assert client.base_url == "https://gw.example.com/openai"
+    assert client._custom_headers["X-FlintAI-API-Key"] == "grl_key"
+    assert _is_wrapped(client)
+
+    client._fault = False
+
+
+def test_shutdown_restore_retries_and_clears_once_successful(monkeypatch, caplog):
+    client = _make_faulty_openai_client()
+    sc = SwitchTrustClient(provider="openai")
+    sc.guardrails_config = _guardrails_config("openai")
+    monkeypatch.setattr(core, "_client", sc)
+
+    wrap_client(client)
+    client._fault = True
+    with caplog.at_level(logging.ERROR, logger="switch_trust"):
+        _clear_wrapped()
+    assert _is_wrapped(client)
+
+    client._fault = False
+    _clear_wrapped()
+
+    assert client.base_url == "https://api.openai.com"
+    assert "X-FlintAI-API-Key" not in client._custom_headers
+    assert not _is_wrapped(client)
+
+
+def test_shutdown_restore_failure_does_not_block_other_clients(monkeypatch, caplog):
+    faulty = _make_faulty_openai_client()
+    healthy = _make_mock_client("openai._client", "OpenAI", "openai")
+    healthy._base_url = "https://api.openai.com"
+    sc = SwitchTrustClient(provider="openai")
+    sc.guardrails_config = _guardrails_config("openai")
+    monkeypatch.setattr(core, "_client", sc)
+
+    wrap_client(faulty)
+    wrap_client(healthy)
+    faulty._fault = True
+    with caplog.at_level(logging.ERROR, logger="switch_trust"):
+        _clear_wrapped()
+
+    # Healthy client fully restored and untracked; faulty one retained.
+    assert healthy._base_url == "https://api.openai.com"
+    assert "X-FlintAI-API-Key" not in healthy._custom_headers
+    assert not _is_wrapped(healthy)
+    assert _is_wrapped(faulty)
+
+    faulty._fault = False
 
 
 # --- Unhashable client tracking ---
@@ -845,7 +977,7 @@ def test_unhashable_client_expired_ref():
     client = _make_unhashable_client("openai._client", "OpenAI")
     _mark_wrapped(client)
 
-    from flintai.plugins._llm_wrapper import _wrapped_client_id_refs
+    from switch_trust.plugins._llm_wrapper import _wrapped_client_id_refs
 
     client_id = id(client)
     assert client_id in _wrapped_client_id_refs
@@ -889,7 +1021,7 @@ def test_apply_guardrails_anthropic_with_httpx():
     from httpx import URL
 
     assert isinstance(client._base_url, URL)
-    assert str(client._base_url) == "https://gw.example.com/anthropic"
+    assert str(client._base_url) == "https://gw.example.com/anthropic/"
 
 
 # --- Environment variable configuration ---
@@ -901,10 +1033,128 @@ def test_wrap_from_env_vars(monkeypatch):
     monkeypatch.setenv("FLINTAI_LLM_API_KEY", "env-llm-key")
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
-    flintai.wrap(client)
+    switch_trust.wrap(client)
     assert client._base_url == "https://gw.env.com/openai"
     assert client._custom_headers["X-FlintAI-API-Key"] == "env-api-key"
     assert client._custom_headers["X-LLM-API-Key"] == "env-llm-key"
+
+
+def _wrap_target(kind):
+    """Return (object to wrap, SDK client that receives the headers, provider)."""
+    if kind == "chat_openai":
+        model, inner_client = _make_langchain_model(
+            "langchain_openai.chat_models", "ChatOpenAI", "root_client", "openai"
+        )
+        return model, inner_client, "openai"
+    module, class_name, provider = {
+        "openai": ("openai._client", "OpenAI", "openai"),
+        "anthropic": ("anthropic._client", "Anthropic", "anthropic"),
+        "google": ("google.genai.client", "Client", "google"),
+    }[kind]
+    client = _make_mock_client(module, class_name, provider)
+    if provider != "google":
+        client._base_url = f"https://api.{provider}.com"
+    return client, client, provider
+
+
+@pytest.mark.parametrize("kind", ["openai", "anthropic", "google", "chat_openai"])
+def test_wrap_sends_agent_identity_from_env(monkeypatch, kind):
+    monkeypatch.setenv("SWITCH_TRUST_GATEWAY_URL", "https://gw.env.com")
+    monkeypatch.setenv("SWITCH_TRUST_API_KEY", "env-api-key")
+    monkeypatch.setenv("AGENT_ID", "agn_123")
+    monkeypatch.setenv("AGENT_NAME", "env-agent")
+    target, sdk_client, provider = _wrap_target(kind)
+    switch_trust.wrap(target)
+    headers = _get_sdk_headers(sdk_client, provider)
+    assert headers["X-Agent-Id"] == "agn_123"
+    assert headers["X-Agent-Name"] == "env-agent"
+
+
+@pytest.mark.parametrize("value", [None, ""], ids=["unset", "empty"])
+def test_wrap_omits_agent_identity_when_env_unset(monkeypatch, value):
+    monkeypatch.setenv("SWITCH_TRUST_GATEWAY_URL", "https://gw.env.com")
+    monkeypatch.setenv("SWITCH_TRUST_API_KEY", "env-api-key")
+    if value is not None:
+        monkeypatch.setenv("AGENT_ID", value)
+        monkeypatch.setenv("AGENT_NAME", value)
+    client = _make_mock_client("openai._client", "OpenAI", "openai")
+    client._base_url = "https://api.openai.com"
+    switch_trust.wrap(client)
+    assert "X-Agent-Id" not in client._custom_headers
+    assert "X-Agent-Name" not in client._custom_headers
+
+
+def test_wrap_skips_non_ascii_agent_name(monkeypatch):
+    """Every header wrap() sets must be ASCII, the encoding httpx uses."""
+    monkeypatch.setenv("SWITCH_TRUST_GATEWAY_URL", "https://gw.env.com")
+    monkeypatch.setenv("SWITCH_TRUST_API_KEY", "env-api-key")
+    monkeypatch.setenv("AGENT_ID", "agn_123")
+    monkeypatch.setenv("AGENT_NAME", "café-bot")
+    client = _make_mock_client("openai._client", "OpenAI", "openai")
+    client._base_url = "https://api.openai.com"
+    switch_trust.wrap(client)
+    assert "X-Agent-Name" not in client._custom_headers
+    assert client._custom_headers["X-Agent-Id"] == "agn_123"
+    for value in client._custom_headers.values():
+        value.encode("ascii")
+
+
+def test_wrap_keeps_caller_agent_identity_when_env_unset(monkeypatch):
+    """Identity headers the caller set in default_headers survive wrap().
+
+    A caller can name the agent this way instead of through the environment.
+    """
+    monkeypatch.setenv("SWITCH_TRUST_GATEWAY_URL", "https://gw.env.com")
+    monkeypatch.setenv("SWITCH_TRUST_API_KEY", "env-api-key")
+    client = _make_mock_client("openai._client", "OpenAI", "openai")
+    client._base_url = "https://api.openai.com"
+    client._custom_headers.update(
+        {"X-Agent-Id": "agn_manual", "X-Agent-Name": "manual-agent"}
+    )
+    switch_trust.wrap(client)
+    assert client._custom_headers["X-Agent-Id"] == "agn_manual"
+    assert client._custom_headers["X-Agent-Name"] == "manual-agent"
+
+
+@pytest.mark.parametrize("header", ["X-Agent-Name", "x-agent-name"])
+def test_wrap_caller_agent_name_beats_env_and_survives_shutdown(monkeypatch, header):
+    """An X-Agent-Name from default_headers wins over AGENT_NAME, in either letter case.
+
+    shutdown() removes only the headers the SDK added, so the caller's header stays.
+    """
+    monkeypatch.setenv("SWITCH_TRUST_GATEWAY_URL", "https://gw.env.com")
+    monkeypatch.setenv("SWITCH_TRUST_API_KEY", "env-api-key")
+    monkeypatch.setenv("AGENT_ID", "agn_env")
+    monkeypatch.setenv("AGENT_NAME", "from-env")
+    client = _make_mock_client("openai._client", "OpenAI", "openai")
+    client._base_url = "https://api.openai.com"
+    client._custom_headers[header] = "from-default-headers"
+    switch_trust.wrap(client)
+    names = {
+        k: v for k, v in client._custom_headers.items() if k.lower() == "x-agent-name"
+    }
+    assert names == {header: "from-default-headers"}
+    assert client._custom_headers["X-Agent-Id"] == "agn_env"
+
+    switch_trust.shutdown()
+
+    assert client._custom_headers[header] == "from-default-headers"
+    assert "X-Agent-Id" not in client._custom_headers
+
+
+def test_shutdown_removes_env_agent_identity(monkeypatch):
+    monkeypatch.setenv("SWITCH_TRUST_GATEWAY_URL", "https://gw.env.com")
+    monkeypatch.setenv("SWITCH_TRUST_API_KEY", "env-api-key")
+    monkeypatch.setenv("AGENT_ID", "agn_123")
+    monkeypatch.setenv("AGENT_NAME", "env-agent")
+    client = _make_mock_client("openai._client", "OpenAI", "openai")
+    client._base_url = "https://api.openai.com"
+    switch_trust.wrap(client)
+
+    switch_trust.shutdown()
+
+    assert "X-Agent-Id" not in client._custom_headers
+    assert "X-Agent-Name" not in client._custom_headers
 
 
 def test_wrap_env_llm_key_beats_client_auto_extract(monkeypatch):
@@ -914,7 +1164,7 @@ def test_wrap_env_llm_key_beats_client_auto_extract(monkeypatch):
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
     client.api_key = "sk-from-client"
-    flintai.wrap(client, forward_llm_key=True)
+    switch_trust.wrap(client, forward_llm_key=True)
     assert client._custom_headers["X-LLM-API-Key"] == "env-llm-key"
 
 
@@ -924,7 +1174,7 @@ def test_wrap_explicit_beats_env(monkeypatch):
     monkeypatch.setenv("FLINTAI_LLM_API_KEY", "env-llm-key")
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
-    flintai.wrap(
+    switch_trust.wrap(
         client,
         gateway_url="https://explicit.com",
         api_key="explicit-key",
@@ -941,7 +1191,7 @@ def test_wrap_auto_extract_when_no_env_llm_key(monkeypatch):
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
     client.api_key = "sk-from-client"
-    flintai.wrap(client, forward_llm_key=True)
+    switch_trust.wrap(client, forward_llm_key=True)
     assert client._custom_headers["X-LLM-API-Key"] == "sk-from-client"
 
 
@@ -950,7 +1200,7 @@ def test_wrap_without_llm_api_key():
     X-LLM-API-Key is not sent — the proxy uses its own upstream credentials."""
     client = _make_mock_client("openai._client", "OpenAI", "openai")
     client._base_url = "https://api.openai.com"
-    flintai.wrap(
+    switch_trust.wrap(
         client,
         gateway_url="https://gw.example.com",
         api_key="grl_key",
@@ -967,7 +1217,9 @@ def test_merge_sdk_headers_raises_when_required():
     cls = type("Anthropic", (), {"__module__": "anthropic._client"})
     client = cls()
     client._base_url = "https://api.anthropic.com"
-    with pytest.raises(FlintAIGuardrailsError, match="Cannot set guardrails headers"):
+    with pytest.raises(
+        SwitchTrustGuardrailsError, match="Cannot set guardrails headers"
+    ):
         _merge_sdk_headers(
             client, "anthropic", {"X-FlintAI-API-Key": "key"}, require_guardrails=True
         )
@@ -990,9 +1242,9 @@ def test_wrap_langchain_client_raises_when_no_config_required(monkeypatch):
     model, _ = _make_langchain_model(
         "langchain_openai.chat_models", "ChatOpenAI", "root_client", "openai"
     )
-    monkeypatch.setattr(core, "_client", FlintAIClient(provider="openai"))
+    monkeypatch.setattr(core, "_client", SwitchTrustClient(provider="openai"))
 
-    with pytest.raises(FlintAIGuardrailsError, match="no config was found"):
+    with pytest.raises(SwitchTrustGuardrailsError, match="no config was found"):
         wrap_client(model)
 
 
@@ -1071,3 +1323,52 @@ def test_check_sdk_version_anthropic_too_new(caplog):
         with caplog.at_level(logging.WARNING):
             _check_sdk_version("anthropic")
     assert "Private API compatibility is not guaranteed" in caplog.text
+
+
+_OPT_OUT_MARKER = "SECURITY CONTROL DISABLED"
+
+
+def _opt_out_records(caplog):
+    return [r for r in caplog.records if _OPT_OUT_MARKER in r.getMessage()]
+
+
+@pytest.mark.parametrize(
+    "module,class_name,provider",
+    [
+        pytest.param("openai._client", "OpenAI", "openai", id="openai"),
+        pytest.param("anthropic._client", "Anthropic", "anthropic", id="anthropic"),
+        pytest.param("google.genai.client", "Client", "google", id="google"),
+    ],
+)
+def test_wrap_opt_out_emits_audit_warning(module, class_name, provider, caplog):
+    client = _make_mock_client(module, class_name, provider)
+    with caplog.at_level(logging.WARNING, logger="switch_trust.guardrails"):
+        switch_trust.wrap(client, require_guardrails=False)
+    assert len(_opt_out_records(caplog)) == 1
+
+
+def test_wrap_dangerously_disable_emits_warning(caplog):
+    client = _make_mock_client("openai._client", "OpenAI", "openai")
+    with caplog.at_level(logging.WARNING, logger="switch_trust.guardrails"):
+        switch_trust.wrap(client, dangerously_disable_guardrails=True)
+    assert len(_opt_out_records(caplog)) == 1
+
+
+def test_wrap_dangerously_disable_conflict_raises():
+    client = _make_mock_client("openai._client", "OpenAI", "openai")
+    with pytest.raises(ValueError, match="Conflicting options"):
+        switch_trust.wrap(
+            client, dangerously_disable_guardrails=True, require_guardrails=True
+        )
+
+
+def test_wrap_guarded_does_not_warn(caplog):
+    client = _make_mock_client("openai._client", "OpenAI", "openai")
+    with caplog.at_level(logging.WARNING, logger="switch_trust.guardrails"):
+        switch_trust.wrap(
+            client,
+            gateway_url="https://gw.example.com",
+            api_key="key",
+            llm_api_key="llm_key",
+        )
+    assert _opt_out_records(caplog) == []

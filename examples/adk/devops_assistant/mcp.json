@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "github": {
+      "type": "remote",
+      "url": "https://api.github.com/mcp"
+    }
+  }
+}

@@ -1,9 +1,9 @@
+[extend]
+useDefault = true
+
 [allowlist]
-description = "Allow dummy/test API keys and example env files"
-paths = [
-    '''\.env\.example$''',
-]
+description = "Allow dummy/test API keys"
 regexes = [
-    '''grl_sk_1234567890''',
-    '''sk-proj-abc123def456''',
+    '''^grl_sk_1234567890$''',
+    '''^sk-proj-abc123def456$''',
 ]

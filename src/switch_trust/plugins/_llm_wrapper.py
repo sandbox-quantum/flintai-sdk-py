@@ -9,7 +9,7 @@ import weakref
 from collections.abc import Callable
 from typing import Any
 
-from flintai.guardrails import FlintAIGuardrailsError, GuardrailsConfig
+from switch_trust.guardrails import GuardrailsConfig, SwitchTrustGuardrailsError
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ def _make_originals_finalizer(client_id: int) -> Callable[[weakref.ref[Any]], No
 
 
 def _is_wrapped(client: Any) -> bool:
-    """Return True if the client has already been wrapped by FlintAI SDK."""
+    """Return True if the client has already been wrapped by Switch Trust SDK."""
     with _wrapped_lock:
         try:
             return client in _wrapped_clients
@@ -74,17 +74,51 @@ def _mark_wrapped(client: Any) -> None:
 
 
 def _clear_wrapped() -> None:
-    """Restore original config on all wrapped clients, then clear tracking."""
+    """Restore config on all wrapped clients, then clear tracking.
+
+    Failures are isolated per client and retained (originals + tracking) for
+    retry on a later shutdown().
+    """
     with _wrapped_lock:
-        for _client_id, (ref, provider, orig_url, header_keys) in list(
+        failed: list[Any] = []
+        for client_id, (ref, provider, orig_url, header_keys) in list(
             _wrapped_client_originals.items()
         ):
             client = ref()
-            if client is not None:
+            if client is None:
+                _wrapped_client_originals.pop(client_id, None)
+                continue
+            try:
                 _restore_client_config(client, provider, orig_url, header_keys)
-        _wrapped_client_originals.clear()
+                _wrapped_client_originals.pop(client_id, None)
+            except Exception:
+                # Keep originals + tracking for retry. Never log the
+                # exception/base URL/headers — they may carry the gateway host
+                # or auth-bearing headers.
+                failed.append(client)
+                logger.error(
+                    "Switch Trust SDK: failed to restore %s client %s during "
+                    "shutdown; it may still route through the guardrail gateway."
+                    " Retained for retry on next shutdown.",
+                    provider,
+                    type(client).__name__,
+                )
+        # Reset all tracking (incl. config-less clients with no originals), then
+        # re-track only the failed clients.
         _wrapped_clients.clear()
         _wrapped_client_id_refs.clear()
+        for client in failed:
+            try:
+                _wrapped_clients.add(client)
+            except TypeError:
+                try:
+                    failed_id = id(client)
+                    _wrapped_client_id_refs[failed_id] = weakref.ref(
+                        client,
+                        _make_id_ref_finalizer(failed_id),
+                    )
+                except TypeError:
+                    pass
 
 
 def _get_base_url(client: Any, provider: str) -> Any:
@@ -211,7 +245,10 @@ def _check_sdk_version(provider: str) -> None:
     package_name, min_version_str, max_major_str = entry
 
     try:
-        from importlib.metadata import PackageNotFoundError, version
+        from importlib.metadata import (  # noqa: PLC0415 - optional extra
+            PackageNotFoundError,
+            version,
+        )
 
         installed = version(package_name)
     except (ImportError, PackageNotFoundError):
@@ -228,8 +265,7 @@ def _check_sdk_version(provider: str) -> None:
     too_new = installed_parts[0] >= max_major
     if too_old or too_new:
         logger.warning(
-            "%s %s is installed but flintai-sdk-py supports %s >=%s,<%s. "
-            "Private API compatibility is not guaranteed.",
+            "%s %s is installed but switch-trust-sdk-py supports %s >=%s,<%s. Private API compatibility is not guaranteed.",
             package_name,
             installed,
             package_name,
@@ -273,9 +309,9 @@ def _detect_client_type(client: Any) -> str:
 
     if module.startswith("google.adk"):
         raise TypeError(
-            "ADK agents cannot be wrapped with flintai.wrap(). "
+            "ADK agents cannot be wrapped with switch_trust.wrap(). "
             "Use ADKGuardrailsPlugin instead:\n"
-            "    from flintai.plugins.adk import ADKGuardrailsPlugin\n"
+            "    from switch_trust.plugins.adk import ADKGuardrailsPlugin\n"
             "    plugin = ADKGuardrailsPlugin(gateway_url=..., api_key=..., llm_api_key=...)\n"
             "    agent = Agent(model=..., generate_content_config=plugin.content_config, "
             "    before_model_callback=plugin.before_model_callback, "
@@ -302,7 +338,9 @@ def _resolve_base_url(provider: str, config: GuardrailsConfig) -> str:
     if config.provider:
         return config.base_url
 
-    from flintai.guardrails import PROVIDER_PATH_MAP
+    from switch_trust.guardrails import (  # noqa: PLC0415 - breaks an import cycle
+        PROVIDER_PATH_MAP,
+    )
 
     path_prefix = PROVIDER_PATH_MAP.get(provider, "")
     return config.gateway_url + path_prefix
@@ -342,7 +380,7 @@ def _merge_sdk_headers(
         sdk_headers.update(headers)
         return
     if require_guardrails:
-        raise FlintAIGuardrailsError(
+        raise SwitchTrustGuardrailsError(
             f"Cannot set guardrails headers on {type(client).__name__}: "
             f"headers dict not found. Traffic would route through the "
             f"guardrails proxy without authentication."
@@ -363,11 +401,14 @@ def _apply_anthropic_config(
     """Rewrite an Anthropic client's base URL and inject guardrails headers."""
     if not hasattr(client, "_base_url"):
         raise TypeError(
-            f"Cannot set base_url on {type(client).__name__}: "
-            f"_base_url attribute not found"
+            f"Cannot set base_url on {type(client).__name__}: _base_url attribute not found"
         )
+    # httpx's URL.join() treats a base URL without a trailing slash as a file,
+    # so a relative request path replaces the last segment instead of
+    # appending after it -- silently dropping the provider prefix.
+    base_url = base_url.rstrip("/") + "/"
     try:
-        from httpx import URL
+        from httpx import URL  # noqa: PLC0415 - optional extra
 
         client._base_url = URL(base_url)
     except ImportError:
@@ -405,14 +446,12 @@ def _apply_google_config(
     api_client = getattr(client, "_api_client", None)
     if api_client is None:
         raise TypeError(
-            f"Cannot set base_url on {type(client).__name__}: "
-            f"_api_client attribute not found"
+            f"Cannot set base_url on {type(client).__name__}: _api_client attribute not found"
         )
     http_options = getattr(api_client, "_http_options", None)
     if http_options is None:
         raise TypeError(
-            f"Cannot set base_url on {type(client).__name__}: "
-            f"_http_options attribute not found"
+            f"Cannot set base_url on {type(client).__name__}: _http_options attribute not found"
         )
     # Google GenAI SDK requires trailing slash; without it, URL joining drops the last segment
     http_options.base_url = base_url.rstrip("/") + "/"
@@ -424,6 +463,25 @@ _PROVIDER_APPLIERS: dict[str, Callable[[Any, str, dict[str, str], bool], None]] 
     "openai": _apply_openai_config,
     "google": _apply_google_config,
 }
+
+_AGENT_IDENTITY_HEADERS = frozenset({"x-agent-id", "x-agent-name"})
+
+
+def _without_caller_identity(
+    client: Any, provider: str, headers: dict[str, str]
+) -> dict[str, str]:
+    """Drop each config identity header that the caller already set on the client.
+
+    The caller's value (e.g. from ``default_headers``) wins over the
+    environment. The key stays out of the applied set, so shutdown() does not
+    remove it. Header names match case-insensitively, as in HTTP.
+    """
+    existing = {k.lower() for k in _get_sdk_headers(client, provider) or {}}
+    return {
+        k: v
+        for k, v in headers.items()
+        if not (k.lower() in _AGENT_IDENTITY_HEADERS and k.lower() in existing)
+    }
 
 
 def _apply_guardrails_config(
@@ -438,10 +496,9 @@ def _apply_guardrails_config(
     applier = _PROVIDER_APPLIERS.get(provider)
     if applier is None:
         raise TypeError(f"No guardrails applier for provider: {provider!r}")
-    applier(client, base_url, config.headers, require_guardrails)
-    _save_client_originals(
-        client, provider, original_base_url, frozenset(config.headers)
-    )
+    headers = _without_caller_identity(client, provider, config.headers)
+    applier(client, base_url, headers, require_guardrails)
+    _save_client_originals(client, provider, original_base_url, frozenset(headers))
 
 
 def wrap_client(client: Any) -> Any:
@@ -451,26 +508,28 @@ def wrap_client(client: Any) -> Any:
     LangChain chat models wrapping one of these).
     Returns the same client instance, mutated in place.
     """
-    from flintai.core import _client as flintai_client
+    from switch_trust.core import (  # noqa: PLC0415 - breaks an import cycle
+        _client as switch_trust_client,
+    )
 
     if _is_wrapped(client):
-        logger.warning("Client is already wrapped by FlintAI SDK; skipping.")
+        logger.warning("Client is already wrapped by Switch Trust SDK; skipping.")
         return client
 
-    require = flintai_client.require_guardrails if flintai_client else False
+    require = switch_trust_client.require_guardrails if switch_trust_client else False
 
     langchain_result = _unwrap_langchain_model(client)
     if langchain_result is not None:
         sdk_client, provider = langchain_result
         _check_sdk_version(provider)
-        if flintai_client and flintai_client.guardrails_config:
+        if switch_trust_client and switch_trust_client.guardrails_config:
             _apply_guardrails_config(
-                sdk_client, provider, flintai_client.guardrails_config, require
+                sdk_client, provider, switch_trust_client.guardrails_config, require
             )
         elif require:
-            raise FlintAIGuardrailsError(
+            raise SwitchTrustGuardrailsError(
                 "Guardrails configuration is required but no config was found. "
-                "Configure guardrails via flintai.init() or flintai.wrap() before "
+                "Configure guardrails via switch_trust.init() or switch_trust.wrap() before "
                 "wrapping LLM clients."
             )
         else:
@@ -483,14 +542,14 @@ def wrap_client(client: Any) -> Any:
     provider = _detect_client_type(client)
     _check_sdk_version(provider)
 
-    if flintai_client and flintai_client.guardrails_config:
+    if switch_trust_client and switch_trust_client.guardrails_config:
         _apply_guardrails_config(
-            client, provider, flintai_client.guardrails_config, require
+            client, provider, switch_trust_client.guardrails_config, require
         )
     elif require:
-        raise FlintAIGuardrailsError(
+        raise SwitchTrustGuardrailsError(
             "Guardrails configuration is required but no config was found. "
-            "Configure guardrails via flintai.init() or flintai.wrap() before "
+            "Configure guardrails via switch_trust.init() or switch_trust.wrap() before "
             "wrapping LLM clients."
         )
     else:

@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-FlintAI SDK is currently in active development. Security fixes are applied to
+Switch Trust SDK is currently in active development. Security fixes are applied to
 the latest released version on PyPI.
 
 | Version | Supported |
@@ -16,7 +16,7 @@ Please **do not** report security vulnerabilities through public GitHub issues,
 discussions, or pull requests.
 
 Instead, report them privately using GitHub's
-[private vulnerability reporting](https://github.com/sandbox-quantum/flintai-sdk-py/security/advisories/new)
+[private vulnerability reporting](https://github.com/sandbox-quantum/switch-trust-sdk-py/security/advisories/new)
 feature (the "Report a vulnerability" button under the repository's **Security**
 tab).
 
@@ -33,8 +33,8 @@ before any public disclosure.
 
 ## Scope
 
-This policy covers the `flintai-sdk-py` package in this repository. The SDK
-routes LLM traffic through the FlintAI guardrails proxy and handles API keys via
+This policy covers the `switch-trust-sdk-py` package in this repository. The SDK
+routes LLM traffic through the Switch Trust guardrails proxy and handles API keys via
 environment variables and request headers; reports related to credential
 handling, request routing, or dependency vulnerabilities are especially
 welcome.

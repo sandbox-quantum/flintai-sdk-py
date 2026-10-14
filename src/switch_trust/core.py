@@ -1,26 +1,41 @@
-"""FlintAI SDK client — central registry for plugins."""
+"""Switch Trust SDK client — central registry for plugins."""
 
 from __future__ import annotations
 
 import logging
+import os
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from flintai.plugins import FlintAIPlugin
+from switch_trust.plugins import SwitchTrustPlugin
 
 if TYPE_CHECKING:
-    from flintai.guardrails import GuardrailsConfig
+    from switch_trust.guardrails import GuardrailsConfig
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["FlintAIClient"]
+__all__ = ["SwitchTrustClient", "GuardrailsStatus"]
 
-_client: FlintAIClient | None = None
+_client: SwitchTrustClient | None = None
 
 
-class FlintAIClient:
-    """Central FlintAI SDK client that holds guardrails config and plugins.
+@dataclass
+class GuardrailsStatus:
+    """Effective guardrails posture of a client."""
 
-    Created by :func:`flintai.init`; a single active instance is tracked as a
+    active: bool
+    """Traffic is routed through the guardrails gateway (config resolved)."""
+    require_guardrails: bool
+    """Fail-closed enforcement is on (throws/verifies rather than opting out)."""
+    provider: str | None
+    agent_id: str | None
+    agent_name: str | None
+
+
+class SwitchTrustClient:
+    """Central Switch Trust SDK client that holds guardrails config and plugins.
+
+    Created by :func:`switch_trust.init`; a single active instance is tracked as a
     module-global singleton. Holds the resolved :class:`GuardrailsConfig` (if any)
     and the list of registered plugins, and fans out lifecycle events to them.
     """
@@ -38,15 +53,25 @@ class FlintAIClient:
             require_guardrails: When True, downstream code fails closed if no
                 guardrails configuration can be resolved.
         """
-        self.plugins: list[FlintAIPlugin] = []
+        self.plugins: list[SwitchTrustPlugin] = []
         self.provider = provider
         self.require_guardrails = require_guardrails
         self.guardrails_config: GuardrailsConfig | None = None
 
     def __repr__(self) -> str:
-        return f"FlintAIClient(provider={self.provider!r}, plugins={len(self.plugins)})"
+        return f"SwitchTrustClient(provider={self.provider!r}, plugins={len(self.plugins)})"
 
-    def register_plugin(self, plugin: FlintAIPlugin) -> None:
+    def guardrails_status(self) -> GuardrailsStatus:
+        """Report the effective guardrails posture of this client."""
+        return GuardrailsStatus(
+            active=self.guardrails_config is not None,
+            require_guardrails=self.require_guardrails,
+            provider=self.provider,
+            agent_id=os.environ.get("AGENT_ID"),
+            agent_name=os.environ.get("AGENT_NAME"),
+        )
+
+    def register_plugin(self, plugin: SwitchTrustPlugin) -> None:
         """Register a plugin and invoke its ``on_init`` hook with this client."""
         self.plugins.append(plugin)
         plugin.on_init(self)

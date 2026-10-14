@@ -9,7 +9,7 @@ from datetime import datetime
 
 from google.adk.agents import LlmAgent
 
-from flintai.plugins.adk import ADKGuardrailsPlugin
+from switch_trust.plugins.adk import ADKGuardrailsPlugin
 
 # Database setup
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "expenses.db")
@@ -206,11 +206,11 @@ When asked about spending:
 
 Use get_current_date to look up today's date when needed."""
 
-    plugin = ADKGuardrailsPlugin()
+    plugin = ADKGuardrailsPlugin(load_dotenv=True)
 
     agent = LlmAgent(
         name="expense_tracker",
-        model="gemini-3-flash-preview",
+        model="gemini-2.5-flash",
         instruction=system_instruction,
         description="An AI assistant that helps users track and analyze their expenses",
         tools=[get_current_date, add_expense, get_monthly_spending, search_expenses],
